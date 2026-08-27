@@ -1,1 +1,212 @@
 @import "tailwindcss";
+
+@theme {
+  --font-display: "Bricolage Grotesque", "Georgia", serif;
+  --font-body: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Spline Sans Mono", ui-monospace, "SF Mono", monospace;
+
+  --color-pine-950: #0b1411;
+  --color-pine-900: #0f1a15;
+  --color-pine-850: #12201a;
+  --color-pine-800: #16251d;
+  --color-pine-700: #1c2d23;
+  --color-pine-600: #25392c;
+  --color-pine-500: #34503e;
+
+  --color-ink: #ede9dc;
+  --color-ink-dim: #a9b9a9;
+  --color-ink-faint: #6d8273;
+
+  --color-ember: #ff6b4a;
+  --color-mint: #4fd6a4;
+  --color-sky: #7da5ff;
+  --color-honey: #ffb35c;
+}
+
+html,
+body {
+  background-color: var(--color-pine-950);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-ember) 45%, transparent);
+  color: var(--color-ink);
+}
+
+/* ---------- reusable surfaces ---------- */
+.panel {
+  background: linear-gradient(180deg, #17271f 0%, #111d17 100%);
+  border: 1px solid #223629;
+  border-radius: 22px;
+  box-shadow: 0 24px 60px -30px rgba(0, 0, 0, 0.65);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid #25392c;
+  background: #142019;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-ink-dim);
+}
+
+kbd.key {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 7px;
+  border-radius: 7px;
+  border: 1px solid #2c4233;
+  border-bottom-width: 2px;
+  background: #16251d;
+  color: var(--color-ink-dim);
+}
+
+.scroll-slim {
+  scrollbar-width: thin;
+  scrollbar-color: #2c4233 transparent;
+}
+.scroll-slim::-webkit-scrollbar {
+  width: 8px;
+}
+.scroll-slim::-webkit-scrollbar-thumb {
+  background: #2c4233;
+  border-radius: 8px;
+}
+.scroll-slim::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- ambient background layers ---------- */
+.bg-dots {
+  background-image: radial-gradient(rgba(237, 233, 220, 0.055) 1px, transparent 1.4px);
+  background-size: 26px 26px;
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 30%, transparent 78%);
+}
+
+.bg-grain {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+  opacity: 0.045;
+}
+
+/* ---------- motion ---------- */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scale(1.14);
+    opacity: 0.6;
+  }
+}
+@keyframes drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(-28px, 22px, 0);
+  }
+}
+@keyframes spinSlow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes growBar {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: scale(0.93) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pulseDot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.72);
+  }
+}
+
+.anim-rise {
+  animation: rise 0.65s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.anim-breathe {
+  animation: breathe 4.5s ease-in-out infinite;
+}
+.anim-drift {
+  animation: drift 14s ease-in-out infinite;
+}
+.anim-pop {
+  animation: popIn 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.anim-toast {
+  animation: toastIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.anim-bar {
+  animation: growBar 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: bottom;
+}
+.anim-pulse-dot {
+  animation: pulseDot 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-rise,
+  .anim-breathe,
+  .anim-drift,
+  .anim-pop,
+  .anim-toast,
+  .anim-bar,
+  .anim-pulse-dot {
+    animation: none;
+  }
+}
