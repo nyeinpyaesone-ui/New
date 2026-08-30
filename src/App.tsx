@@ -12,6 +12,15 @@ import {
 import { computeStreak, formatClock, todayKey } from "./lib/dates";
 import { playBreakEnd, playChime, playClick } from "./lib/sound";
 import { eraseKeys, useLocalStorage } from "./hooks/useLocalStorage";
+import {
+  parseBackup,
+  sanitizeHistory,
+  sanitizeRuntime,
+  sanitizeSettings,
+  sanitizeTasks,
+  serializeBackup,
+} from "./lib/data";
+import { resetFavicon, setFavicon } from "./lib/favicon";
 import ModeTabs from "./components/ModeTabs";
 import TimerDial from "./components/TimerDial";
 import StatsPanel from "./components/StatsPanel";
@@ -40,15 +49,23 @@ const KEYS = [
 const makeId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
 export default function App() {
-  const [settings, setSettings] = useLocalStorage<Settings>("simmer.settings.v1", DEFAULT_SETTINGS);
-  const [tasks, setTasks] = useLocalStorage<Task[]>("simmer.tasks.v1", []);
-  const [history, setHistory] = useLocalStorage<History>("simmer.history.v1", {});
+  const [settings, setSettings] = useLocalStorage<Settings>(
+    "simmer.settings.v1",
+    DEFAULT_SETTINGS,
+    sanitizeSettings,
+  );
+  const [tasks, setTasks] = useLocalStorage<Task[]>("simmer.tasks.v1", [], sanitizeTasks);
+  const [history, setHistory] = useLocalStorage<History>("simmer.history.v1", {}, sanitizeHistory);
   const [activeId, setActiveId] = useLocalStorage<string | null>("simmer.active.v1", null);
-  const [runtime, setRuntime] = useLocalStorage<RuntimeState>("simmer.runtime.v1", {
-    mode: "focus",
-    secondsLeft: DEFAULT_SETTINGS.focusMin * 60,
-    cyclePos: 0,
-  });
+  const [runtime, setRuntime] = useLocalStorage<RuntimeState>(
+    "simmer.runtime.v1",
+    {
+      mode: "focus",
+      secondsLeft: DEFAULT_SETTINGS.focusMin * 60,
+      cyclePos: 0,
+    },
+    (raw) => sanitizeRuntime(raw, settings),
+  );
   const [isRunning, setIsRunning] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -64,15 +81,6 @@ export default function App() {
     setToasts((t) => [...t.slice(-2), { id, msg, kind }]);
     window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
   };
-
-  /* ---------------- sanitize stored runtime on first load ---------------- */
-  useEffect(() => {
-    setRuntime((r) => {
-      const cap = dur(r.mode);
-      return { ...r, secondsLeft: r.secondsLeft > 0 && r.secondsLeft <= cap ? r.secondsLeft : cap };
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   /* ---------------- session completion ---------------- */
   const finishSession = (crediting: boolean) => {
@@ -163,13 +171,18 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings]);
 
-  /* ---------------- document title ---------------- */
+  /* ---------------- document title + live favicon ---------------- */
+  const engaged = isRunning || secondsLeft < total;
   useEffect(() => {
-    document.title =
-      isRunning || secondsLeft < total
-        ? `${formatClock(secondsLeft)} · ${MODE_META[mode].label} — Simmer`
-        : "Simmer — Pomodoro Focus Desk";
-  }, [secondsLeft, mode, isRunning, total]);
+    document.title = engaged
+      ? `${formatClock(secondsLeft)} · ${MODE_META[mode].label} — Simmer`
+      : "Simmer — Pomodoro Focus Desk";
+    if (engaged) {
+      setFavicon(mode, total > 0 ? secondsLeft / total : 1, Math.max(1, Math.ceil(secondsLeft / 60)));
+    } else {
+      resetFavicon();
+    }
+  }, [secondsLeft, mode, isRunning, total, engaged]);
 
   /* ---------------- keyboard shortcuts ---------------- */
   useEffect(() => {
@@ -252,6 +265,47 @@ export default function App() {
     setRuntime({ mode: "focus", secondsLeft: DEFAULT_SETTINGS.focusMin * 60, cyclePos: 0 });
     setIsRunning(false);
     addToast("All data erased — a fresh start", "info");
+  };
+
+  /* ---------------- backup export / import ---------------- */
+  const exportBackup = () => {
+    try {
+      const blob = new Blob([serializeBackup({ settings, tasks, history, activeId })], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `simmer-backup-${todayKey()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 800);
+      addToast("Backup downloaded — keep it somewhere safe", "info");
+    } catch {
+      addToast("Export failed — your browser blocked the download", "info");
+    }
+  };
+
+  const importBackup = (text: string) => {
+    try {
+      const data = parseBackup(text);
+      setIsRunning(false);
+      if (data.settings) setSettings(data.settings);
+      if (data.tasks) setTasks(data.tasks);
+      if (data.history) setHistory(data.history);
+      if (data.activeId !== undefined) {
+        const stillValid =
+          data.activeId === null ||
+          (data.tasks ?? tasks).some((t) => t.id === data.activeId && !t.done);
+        setActiveId(stillValid ? data.activeId : null);
+      }
+      const focusMin = data.settings?.focusMin ?? settings.focusMin;
+      setRuntime({ mode: "focus", secondsLeft: focusMin * 60, cyclePos: 0 });
+      addToast("Backup restored — welcome back", "info");
+    } catch (err) {
+      addToast(`Import failed — ${err instanceof Error ? err.message : "unreadable file"}`, "info");
+    }
   };
 
   const activeTask = tasks.find((t) => t.id === activeId && !t.done) ?? null;
@@ -442,6 +496,8 @@ export default function App() {
         settings={settings}
         onPatch={patchSettings}
         onEraseAll={eraseAll}
+        onExport={exportBackup}
+        onImport={importBackup}
       />
       <Toasts toasts={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
     </div>

@@ -8,6 +8,8 @@ interface Props {
   settings: Settings;
   onPatch: (patch: Partial<Settings>) => void;
   onEraseAll: () => void;
+  onExport: () => void;
+  onImport: (text: string) => void;
 }
 
 function Stepper({
@@ -93,9 +95,18 @@ function Switch({
   );
 }
 
-export default function SettingsModal({ open, onClose, settings, onPatch, onEraseAll }: Props) {
+export default function SettingsModal({
+  open,
+  onClose,
+  settings,
+  onPatch,
+  onEraseAll,
+  onExport,
+  onImport,
+}: Props) {
   const [confirming, setConfirming] = useState(false);
   const confirmTimer = useRef<number | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -223,6 +234,42 @@ export default function SettingsModal({ open, onClose, settings, onPatch, onEras
             max={20}
             unit="toms"
             onChange={(v) => onPatch({ dailyGoal: v })}
+          />
+        </div>
+
+        <h3 className="mt-6 font-mono text-[11px] font-semibold uppercase tracking-[0.22em] text-sky">
+          Your data
+        </h3>
+        <div className="mt-3 rounded-2xl border border-pine-600 bg-pine-900/60 p-4">
+          <p className="text-xs text-ink-dim">
+            Tasks, history and settings as a JSON backup — move them to another browser or keep a
+            snapshot before experimenting.
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-2.5">
+            <button
+              onClick={onExport}
+              className="rounded-xl border border-pine-500 bg-pine-800 px-4 py-2.5 text-sm font-bold text-ink transition-all duration-200 hover:border-sky/50 hover:text-sky active:scale-[0.98]"
+            >
+              Export backup
+            </button>
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="rounded-xl border border-pine-500 bg-pine-800 px-4 py-2.5 text-sm font-bold text-ink transition-all duration-200 hover:border-sky/50 hover:text-sky active:scale-[0.98]"
+            >
+              Import backup
+            </button>
+          </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            aria-label="Choose a Simmer backup file to import"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void file.text().then(onImport);
+              e.target.value = "";
+            }}
           />
         </div>
 

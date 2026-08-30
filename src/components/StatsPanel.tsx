@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { History, Settings } from "../lib/types";
 import { lastNDays, prettyToday, todayKey } from "../lib/dates";
 import { IconCheck, IconClock, IconFlame, IconTomato } from "./icons";
@@ -8,12 +9,50 @@ interface Props {
   streak: number;
 }
 
+/** eases the displayed number toward its target whenever it changes */
+function useCountUp(target: number): number {
+  const [display, setDisplay] = useState(target);
+  const fromRef = useRef(target);
+  useEffect(() => {
+    const from = fromRef.current;
+    fromRef.current = target;
+    if (from === target) return;
+    const t0 = performance.now();
+    const dur = 520;
+    let raf = 0;
+    const step = (t: number) => {
+      const p = Math.min(1, (t - t0) / dur);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setDisplay(Math.round(from + (target - from) * eased));
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target]);
+  return display;
+}
+
 export default function StatsPanel({ history, settings, streak }: Props) {
   const today = history[todayKey()] ?? { pomos: 0, minutes: 0, tasksDone: 0 };
   const week = lastNDays(7).map((d) => ({ ...d, pomos: history[d.key]?.pomos ?? 0 }));
   const maxVal = Math.max(settings.dailyGoal, ...week.map((d) => d.pomos), 1);
   const goalPct = Math.min(100, Math.round((today.pomos / settings.dailyGoal) * 100));
   const weekTotal = week.reduce((s, d) => s + d.pomos, 0);
+  const shownPomos = useCountUp(today.pomos);
+
+  /* all-time rollups */
+  const entries = Object.entries(history).filter(([, d]) => d.pomos > 0);
+  const allPomos = entries.reduce((s, [, d]) => s + d.pomos, 0);
+  const allMinutes = entries.reduce((s, [, d]) => s + d.minutes, 0);
+  const allHours = Math.floor(allMinutes / 60);
+  const timeLabel = allHours > 0 ? `${allHours}h ${allMinutes % 60}m` : `${allMinutes}m`;
+  const best = entries.sort((a, b) => b[1].pomos - a[1].pomos)[0];
+  const bestLabel = best
+    ? `${best[1].pomos} · ${new Date(`${best[0]}T12:00:00`).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      })}`
+    : "—";
 
   return (
     <section className="panel anim-rise p-5 sm:p-6" style={{ animationDelay: "0.08s" }} aria-label="Focus statistics">
@@ -36,7 +75,7 @@ export default function StatsPanel({ history, settings, streak }: Props) {
       <div className="mt-5 flex items-end justify-between gap-4">
         <div className="flex items-end gap-2">
           <span className="font-display text-[56px] font-extrabold leading-none tracking-tight text-ink tabular">
-            {today.pomos}
+            {shownPomos}
           </span>
           <span className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-ink-faint">
             <IconTomato size={16} className="text-ember" /> of {settings.dailyGoal} tomatoes
@@ -110,6 +149,35 @@ export default function StatsPanel({ history, settings, streak }: Props) {
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* all-time rollup */}
+      <div className="mt-6 border-t border-pine-700/70 pt-4">
+        <h3 className="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-ink-faint">
+          All-time
+        </h3>
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <span className="flex items-baseline gap-1.5">
+            <strong className="tabular font-display text-lg font-bold leading-none text-ink">
+              {allPomos}
+            </strong>
+            <span className="text-[11px] font-medium text-ink-faint">tomatoes</span>
+          </span>
+          <span className="h-3.5 w-px bg-pine-600" aria-hidden="true" />
+          <span className="flex items-baseline gap-1.5">
+            <strong className="tabular font-display text-lg font-bold leading-none text-ink">
+              {timeLabel}
+            </strong>
+            <span className="text-[11px] font-medium text-ink-faint">deep work</span>
+          </span>
+          <span className="h-3.5 w-px bg-pine-600" aria-hidden="true" />
+          <span className="flex items-baseline gap-1.5">
+            <strong className="tabular font-display text-lg font-bold leading-none text-honey">
+              {bestLabel}
+            </strong>
+            <span className="text-[11px] font-medium text-ink-faint">best day</span>
+          </span>
         </div>
       </div>
     </section>

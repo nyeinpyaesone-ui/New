@@ -88,6 +88,13 @@ kbd.key {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---------- keyboard focus ---------- */
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-ember) 75%, transparent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
 /* ---------- ambient background layers ---------- */
 .bg-dots {
   background-image: radial-gradient(rgba(237, 233, 220, 0.055) 1px, transparent 1.4px);
