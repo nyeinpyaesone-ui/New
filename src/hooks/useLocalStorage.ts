@@ -1,10 +1,18 @@
 import { useEffect, useState } from "react";
 
-export function useLocalStorage<T>(key: string, initial: T | (() => T)) {
+export function useLocalStorage<T>(
+  key: string,
+  initial: T | (() => T),
+  /** optional validator — anything stored on disk passes through this on load */
+  sanitize?: (raw: unknown) => T,
+) {
   const [value, setValue] = useState<T>(() => {
     try {
       const raw = window.localStorage.getItem(key);
-      if (raw != null) return JSON.parse(raw) as T;
+      if (raw != null) {
+        const parsed = JSON.parse(raw) as unknown;
+        return sanitize ? sanitize(parsed) : (parsed as T);
+      }
     } catch {
       /* corrupted or unavailable storage — fall through to defaults */
     }
