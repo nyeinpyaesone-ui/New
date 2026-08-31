@@ -1,6 +1,8 @@
 import {
+  AMBIENTS,
   DEFAULT_SETTINGS,
   MODE_ORDER,
+  type Ambient,
   type History,
   type JournalEvent,
   type JournalType,
@@ -38,6 +40,8 @@ export function sanitizeSettings(raw: unknown): Settings {
     autoFocus: typeof raw.autoFocus === "boolean" ? raw.autoFocus : d.autoFocus,
     sound: typeof raw.sound === "boolean" ? raw.sound : d.sound,
     volume: clamp(num(raw.volume, d.volume), 0, 1),
+    ambient: AMBIENTS.some((a) => a.id === raw.ambient) ? (raw.ambient as Ambient) : d.ambient,
+    notify: typeof raw.notify === "boolean" ? raw.notify : d.notify,
     dailyGoal: clamp(int(num(raw.dailyGoal, d.dailyGoal)), 1, 20),
   };
 }
@@ -115,7 +119,7 @@ export interface BackupData {
 
 export function serializeBackup(data: BackupData): string {
   return JSON.stringify(
-    { app: "simmer", version: 1, exportedAt: new Date().toISOString(), data },
+    { app: "simmer", version: 1, exportedAt: new Date().toISOString(), data: { journal: [], ...data } },
     null,
     2,
   );

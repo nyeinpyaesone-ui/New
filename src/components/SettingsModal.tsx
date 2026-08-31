@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { PRESETS, type Settings } from "../lib/types";
 import { playChime, playClick } from "../lib/sound";
+import { notificationsSupported, requestNotifyPermission } from "../lib/notify";
 import { IconClose, IconMinus, IconPlus } from "./icons";
 
 interface Props {
@@ -11,6 +12,7 @@ interface Props {
   onEraseAll: () => void;
   onExport: () => void;
   onImport: (text: string) => void;
+  onToast: (msg: string) => void;
 }
 
 function Stepper({
@@ -104,10 +106,29 @@ export default function SettingsModal({
   onEraseAll,
   onExport,
   onImport,
+  onToast,
 }: Props) {
   const [confirming, setConfirming] = useState(false);
   const confirmTimer = useRef<number | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const handleNotifyToggle = async (v: boolean) => {
+    if (!v) {
+      onPatch({ notify: false });
+      return;
+    }
+    if (!notificationsSupported()) {
+      onToast("This browser doesn’t support notifications");
+      return;
+    }
+    const granted = await requestNotifyPermission();
+    if (granted) {
+      onPatch({ notify: true });
+      onToast("Notifications on — we’ll nudge you when a session ends");
+    } else {
+      onToast("Notifications are blocked in this browser");
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -285,6 +306,12 @@ export default function SettingsModal({
               </button>
             </div>
           </div>
+          <Switch
+            label="Browser notifications"
+            hint="A system alert when a session ends while this tab is hidden"
+            checked={settings.notify}
+            onChange={handleNotifyToggle}
+          />
           <Stepper
             label="Daily goal"
             hint="Tomatoes you’re aiming for today"

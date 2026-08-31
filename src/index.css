@@ -192,6 +192,15 @@ input.simmer-range:disabled {
     transform: scale(0.72);
   }
 }
+@keyframes eq {
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
 
 .anim-rise {
   animation: rise 0.65s cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -215,6 +224,10 @@ input.simmer-range:disabled {
 .anim-pulse-dot {
   animation: pulseDot 1.6s ease-in-out infinite;
 }
+.anim-eq {
+  animation: eq 0.9s ease-in-out infinite;
+  transform-origin: bottom;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .anim-rise,
@@ -223,7 +236,8 @@ input.simmer-range:disabled {
   .anim-pop,
   .anim-toast,
   .anim-bar,
-  .anim-pulse-dot {
+  .anim-pulse-dot,
+  .anim-eq {
     animation: none;
   }
 }

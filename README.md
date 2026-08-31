@@ -14,13 +14,15 @@ backgrounded tabs.
 | Customisation | Editable durations (focus 1–90 min, short 1–30, long 1–60), one-click **presets** (Classic 25·5·15, Deep work 50·10·20, Sprint 15·3·10), sessions per round, daily goal, auto-start toggles, completion sounds with a **volume slider + test chime** |
 | Tasks | Focus queue with estimated tomatoes, per-task completed-tomato tracking, a "now focusing" selection, **drag-to-reorder rows** (mouse + keyboard, via dnd-kit), done / delete / clear-done |
 | Journal | Timestamped record of every completed session, finished task and goal hit — grouped by day, capped at 60 entries, included in backups |
-| Statistics | Today's pomodoros vs. goal, focus minutes, tasks completed, day streak, animated 7-day chart, all-time rollups (total tomatoes, deep-work time, best day) |
+| Statistics | Today's pomodoros vs. goal, focus minutes, tasks completed, day streak, animated 7-day chart, a **12-week heatmap**, all-time rollups (total tomatoes, deep-work time, best day) |
+| Ambience | Generative **ambient soundscapes** — Rain, Café, Deep flow — synthesised with WebAudio noise + filters (no audio files), animated EQ bars while playing, volume follows the chime slider |
 | Data | Everything persisted to `localStorage`, JSON backup **export / import**, two-step "erase all data", validated hydration (corrupt or hand-edited storage can't crash the app) |
-| Polish | Live countdown in the document title **and** the favicon, WebAudio chimes, toast notifications, keyboard shortcuts, error boundary with recovery, `prefers-reduced-motion` support, web manifest + SVG icon |
+| Alerts | **Browser notifications** when a session completes while the tab is hidden (opt-in, permission-guarded), plus in-app toasts and confetti |
+| Polish | Live countdown in the document title **and** the favicon, WebAudio chimes with volume control, a **keyboard shortcuts overlay** (`?`), error boundary with recovery, `prefers-reduced-motion` support, web manifest + SVG icon |
 
 ## Keyboard shortcuts
 
-`Space` start/pause · `R` reset · `S` skip · `1`/`2`/`3` switch mode · `Esc` close settings
+`Space` start/pause · `R` reset · `S` skip · `1`/`2`/`3` switch mode · `?` shortcuts overlay · `Esc` close dialogs
 
 ## Quick start
 
@@ -45,6 +47,8 @@ src/
     data.ts                 storage sanitizers + backup serialize/parse (throws readable errors)
     favicon.ts              live SVG favicon (progress ring + minutes left)
     sound.ts                WebAudio chimes (lazy AudioContext, no assets)
+    ambient.ts              generative soundscapes — pink/brown/white noise shaped by filters + LFO
+    notify.ts               opt-in browser notifications for hidden-tab completions
   hooks/
     useLocalStorage.ts      persisted state with optional hydration sanitizer
   components/
@@ -54,6 +58,7 @@ src/
     TaskPanel.tsx           draggable queue (dnd-kit) with estimate picker + empty state
     JournalPanel.tsx        day-grouped activity log
     SettingsModal.tsx       durations, presets, volume, flow toggles, backup export/import, danger zone
+    ShortcutsOverlay.tsx    keyboard map dialog ("?")
     Toasts.tsx              inline notifications
     ErrorBoundary.tsx       crash recovery UI
     icons.tsx               hand-drawn inline SVG icon set
@@ -63,7 +68,7 @@ src/
 
 | Key | Shape |
 | --- | --- |
-| `settings.v1` | `{ focusMin, shortMin, longMin, longEvery, autoBreak, autoFocus, sound, volume, dailyGoal }` |
+| `settings.v1` | `{ focusMin, shortMin, longMin, longEvery, autoBreak, autoFocus, sound, volume, ambient, notify, dailyGoal }` |
 | `tasks.v1` | `Task[]` — `{ id, title, est, donePomos, done, createdAt }` |
 | `history.v1` | `{ "YYYY-MM-DD": { pomos, minutes, tasksDone } }` |
 | `journal.v1` | `JournalEvent[]` — `{ id, at, type, text }`, newest first, max 60 |

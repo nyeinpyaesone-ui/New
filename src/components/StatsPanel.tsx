@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { History, Settings } from "../lib/types";
-import { lastNDays, prettyToday, todayKey } from "../lib/dates";
+import { dayKey, lastNDays, prettyToday, todayKey } from "../lib/dates";
 import { IconCheck, IconClock, IconFlame, IconTomato } from "./icons";
 
 interface Props {
@@ -8,6 +8,19 @@ interface Props {
   settings: Settings;
   streak: number;
 }
+
+const heatColor = (n: number) =>
+  n <= 0
+    ? "#1a2a20"
+    : n === 1
+      ? "color-mix(in srgb, #ff6b4a 30%, #1a2a20)"
+      : n <= 3
+        ? "color-mix(in srgb, #ff6b4a 55%, #1a2a20)"
+        : n <= 5
+          ? "color-mix(in srgb, #ff6b4a 80%, #1a2a20)"
+          : "#ff6b4a";
+
+const WEEKS = 12;
 
 /** eases the displayed number toward its target whenever it changes */
 function useCountUp(target: number): number {
@@ -53,6 +66,26 @@ export default function StatsPanel({ history, settings, streak }: Props) {
         day: "numeric",
       })}`
     : "—";
+
+  /* 12-week field (columns = weeks, cells = days, ending today) */
+  const heat: { key: string; label: string; count: number }[][] = [];
+  const start = new Date();
+  start.setDate(start.getDate() - (WEEKS * 7 - 1));
+  for (let w = 0; w < WEEKS; w++) {
+    const col: { key: string; label: string; count: number }[] = [];
+    for (let d = 0; d < 7; d++) {
+      const dt = new Date(start);
+      dt.setDate(start.getDate() + w * 7 + d);
+      const key = dayKey(dt);
+      col.push({
+        key,
+        label: dt.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        count: history[key]?.pomos ?? 0,
+      });
+    }
+    heat.push(col);
+  }
+  const heatTotal = heat.flat().reduce((s, c) => s + c.count, 0);
 
   return (
     <section className="panel anim-rise p-5 sm:p-6" style={{ animationDelay: "0.08s" }} aria-label="Focus statistics">
@@ -149,6 +182,44 @@ export default function StatsPanel({ history, settings, streak }: Props) {
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* 12-week field */}
+      <div className="mt-6">
+        <div className="flex items-baseline justify-between">
+          <h3 className="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-ink-faint">
+            Last 12 weeks
+          </h3>
+          <span className="text-xs text-ink-faint">
+            <strong className="tabular font-semibold text-ink-dim">{heatTotal}</strong> tomato
+            {heatTotal === 1 ? "" : "es"}
+          </span>
+        </div>
+        <div
+          className="mt-3 flex items-start justify-between gap-[3px]"
+          role="img"
+          aria-label={`Heatmap of the last 12 weeks — ${heatTotal} tomatoes in total`}
+        >
+          {heat.map((col, wi) => (
+            <div key={wi} className="flex flex-1 flex-col gap-[3px]">
+              {col.map((cell) => (
+                <div
+                  key={cell.key}
+                  title={`${cell.count} tomato${cell.count === 1 ? "" : "es"} · ${cell.label}`}
+                  className="aspect-square w-full rounded-[3px] transition-transform duration-150 hover:scale-125"
+                  style={{ background: heatColor(cell.count) }}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 flex items-center justify-end gap-1.5 font-mono text-[10px] text-ink-faint">
+          less
+          {[0, 1, 3, 5, 7].map((n) => (
+            <span key={n} className="h-2.5 w-2.5 rounded-[3px]" style={{ background: heatColor(n) }} />
+          ))}
+          more
         </div>
       </div>
 
