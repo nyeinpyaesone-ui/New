@@ -1,15 +1,17 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 interface IconProps {
   size?: number;
   className?: string;
   strokeWidth?: number;
+  style?: CSSProperties;
 }
 
 function Base({
   size = 20,
   className,
   strokeWidth = 1.8,
+  style,
   children,
 }: IconProps & { children: ReactNode }) {
   return (
@@ -23,6 +25,7 @@ function Base({
       strokeLinecap="round"
       strokeLinejoin="round"
       className={className}
+      style={style}
       aria-hidden="true"
     >
       {children}
@@ -122,6 +125,17 @@ export const IconVolumeOff = (p: IconProps) => (
 export const IconClose = (p: IconProps) => (
   <Base {...p}>
     <path d="M17.5 6.5l-11 11M6.5 6.5l11 11" />
+  </Base>
+);
+
+export const IconGrip = (p: IconProps) => (
+  <Base {...p}>
+    <circle cx="9" cy="6" r="1" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="6" r="1" fill="currentColor" stroke="none" />
+    <circle cx="9" cy="12" r="1" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="12" r="1" fill="currentColor" stroke="none" />
+    <circle cx="9" cy="18" r="1" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="18" r="1" fill="currentColor" stroke="none" />
   </Base>
 );
 

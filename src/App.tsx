@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import confetti from "canvas-confetti";
+import { arrayMove } from "@dnd-kit/sortable";
 import {
   DEFAULT_SETTINGS,
   MODE_META,
   type History,
+  type JournalEvent,
+  type JournalType,
   type Mode,
   type RuntimeState,
   type Settings,
@@ -10,11 +14,12 @@ import {
   type Toast,
 } from "./lib/types";
 import { computeStreak, formatClock, todayKey } from "./lib/dates";
-import { playBreakEnd, playChime, playClick } from "./lib/sound";
+import { playBreakEnd, playChime, playClick, setMasterVolume } from "./lib/sound";
 import { eraseKeys, useLocalStorage } from "./hooks/useLocalStorage";
 import {
   parseBackup,
   sanitizeHistory,
+  sanitizeJournal,
   sanitizeRuntime,
   sanitizeSettings,
   sanitizeTasks,
@@ -25,6 +30,7 @@ import ModeTabs from "./components/ModeTabs";
 import TimerDial from "./components/TimerDial";
 import StatsPanel from "./components/StatsPanel";
 import TaskPanel from "./components/TaskPanel";
+import JournalPanel from "./components/JournalPanel";
 import SettingsModal from "./components/SettingsModal";
 import Toasts from "./components/Toasts";
 import {
@@ -42,6 +48,7 @@ const KEYS = [
   "simmer.settings.v1",
   "simmer.tasks.v1",
   "simmer.history.v1",
+  "simmer.journal.v1",
   "simmer.active.v1",
   "simmer.runtime.v1",
 ];
@@ -66,6 +73,11 @@ export default function App() {
     },
     (raw) => sanitizeRuntime(raw, settings),
   );
+  const [journal, setJournal] = useLocalStorage<JournalEvent[]>(
+    "simmer.journal.v1",
+    [],
+    sanitizeJournal,
+  );
   const [isRunning, setIsRunning] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -82,6 +94,31 @@ export default function App() {
     window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
   };
 
+  /* ---------------- journal ---------------- */
+  const logEvent = (type: JournalType, text: string) => {
+    setJournal((j) => [{ id: makeId(), at: Date.now(), type, text }, ...j].slice(0, 60));
+  };
+
+  /* ---------------- celebration ---------------- */
+  const burst = (particleCount: number, origin: { x: number; y: number }, angle?: number) => {
+    confetti({
+      particleCount,
+      spread: 72,
+      startVelocity: 32,
+      scalar: 0.85,
+      ticks: 140,
+      origin,
+      ...(angle !== undefined ? { angle } : {}),
+      colors: ["#ff6b4a", "#ffb35c", "#4fd6a4", "#7da5ff", "#ede9dc"],
+      disableForReducedMotion: true,
+    });
+  };
+
+  /* ---------------- chime volume ---------------- */
+  useEffect(() => {
+    setMasterVolume(settings.volume);
+  }, [settings.volume]);
+
   /* ---------------- session completion ---------------- */
   const finishSession = (crediting: boolean) => {
     if (mode === "focus") {
@@ -96,6 +133,14 @@ export default function App() {
         setTasks((ts) =>
           ts.map((t) => (t.id === activeId && !t.done ? { ...t, donePomos: t.donePomos + 1 } : t)),
         );
+        const focusingOn = tasks.find((t) => t.id === activeId && !t.done);
+        logEvent(
+          "focus",
+          focusingOn
+            ? `Focus · ${settings.focusMin} min on “${focusingOn.title}”`
+            : `Focus · ${settings.focusMin} min`,
+        );
+        burst(45, { x: 0.5, y: 0.32 });
         if (settings.sound) playChime();
       } else if (settings.sound) {
         playClick();
@@ -110,6 +155,7 @@ export default function App() {
         next,
       );
     } else {
+      logEvent(mode, `${mode === "long" ? "Long break" : "Short break"} · ${settings[MODE_META[mode].durKey]} min`);
       if (settings.sound) playBreakEnd();
       setRuntime({ mode: "focus", secondsLeft: dur("focus"), cyclePos });
       setIsRunning(settings.autoFocus);
@@ -220,6 +266,9 @@ export default function App() {
       prevPomosRef.current < settings.dailyGoal
     ) {
       addToast(`Daily goal of ${settings.dailyGoal} tomatoes reached — splendid`, "focus");
+      logEvent("goal", `Daily goal of ${settings.dailyGoal} tomatoes reached`);
+      burst(90, { x: 0, y: 0.65 }, 60);
+      window.setTimeout(() => burst(90, { x: 1, y: 0.65 }, 120), 220);
     }
     prevPomosRef.current = todayPomos;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -243,8 +292,20 @@ export default function App() {
         const d = h[k] ?? { pomos: 0, minutes: 0, tasksDone: 0 };
         return { ...h, [k]: { ...d, tasksDone: d.tasksDone + 1 } };
       });
+      logEvent("task", `Done — “${task.title}”`);
     }
   };
+
+  const reorderTasks = (draggedId: string, overId: string) => {
+    setTasks((ts) => {
+      const from = ts.findIndex((t) => t.id === draggedId);
+      const to = ts.findIndex((t) => t.id === overId);
+      if (from < 0 || to < 0 || from === to) return ts;
+      return arrayMove(ts, from, to);
+    });
+  };
+
+  const clearJournal = () => setJournal([]);
 
   const deleteTask = (id: string) => {
     setTasks((ts) => ts.filter((t) => t.id !== id));
@@ -261,6 +322,7 @@ export default function App() {
     setSettings(DEFAULT_SETTINGS);
     setTasks([]);
     setHistory({});
+    setJournal([]);
     setActiveId(null);
     setRuntime({ mode: "focus", secondsLeft: DEFAULT_SETTINGS.focusMin * 60, cyclePos: 0 });
     setIsRunning(false);
@@ -270,7 +332,7 @@ export default function App() {
   /* ---------------- backup export / import ---------------- */
   const exportBackup = () => {
     try {
-      const blob = new Blob([serializeBackup({ settings, tasks, history, activeId })], {
+      const blob = new Blob([serializeBackup({ settings, tasks, history, journal, activeId })], {
         type: "application/json",
       });
       const url = URL.createObjectURL(blob);
@@ -294,6 +356,7 @@ export default function App() {
       if (data.settings) setSettings(data.settings);
       if (data.tasks) setTasks(data.tasks);
       if (data.history) setHistory(data.history);
+      if (data.journal) setJournal(data.journal);
       if (data.activeId !== undefined) {
         const stillValid =
           data.activeId === null ||
@@ -461,7 +524,9 @@ export default function App() {
               onToggleDone={toggleDone}
               onDelete={deleteTask}
               onClearDone={clearDone}
+              onReorder={reorderTasks}
             />
+            <JournalPanel journal={journal} onClear={clearJournal} />
           </div>
         </main>
 

@@ -1,6 +1,22 @@
 import { useState, type FormEvent } from "react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { Task } from "../lib/types";
-import { IconCheck, IconMinus, IconPlus, IconTrash, IconTomato } from "./icons";
+import { IconCheck, IconGrip, IconMinus, IconPlus, IconTrash, IconTomato } from "./icons";
 
 interface Props {
   tasks: Task[];
@@ -10,7 +26,118 @@ interface Props {
   onToggleDone: (id: string) => void;
   onDelete: (id: string) => void;
   onClearDone: () => void;
+  onReorder: (draggedId: string, overId: string) => void;
 }
+
+/* ---------------- one draggable row ---------------- */
+
+function Row({
+  task,
+  isActive,
+  onSelect,
+  onToggleDone,
+  onDelete,
+}: {
+  task: Task;
+  isActive: boolean;
+  onSelect: (id: string) => void;
+  onToggleDone: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } =
+    useSortable({ id: task.id });
+  const filled = Math.min(task.donePomos, task.est);
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      {...attributes}
+      className={`group flex items-center gap-2.5 rounded-2xl border px-3 py-3 transition-colors duration-200 ${
+        isActive
+          ? "border-ember/45 bg-ember/[0.06]"
+          : "border-pine-600/70 bg-pine-800/40 hover:border-pine-500 hover:bg-pine-800/80"
+      } ${task.done ? "opacity-55" : ""} ${
+        isDragging ? "z-10 border-ember/60 shadow-[0_18px_40px_-18px_rgba(0,0,0,0.9)]" : ""
+      }`}
+    >
+      <button
+        ref={setActivatorNodeRef}
+        {...listeners}
+        aria-label={`Reorder ${task.title}`}
+        title="Drag to reorder"
+        className="-ml-1 shrink-0 cursor-grab touch-none rounded-md p-1 text-ink-faint/60 transition-colors hover:bg-pine-700 hover:text-ink-dim active:cursor-grabbing"
+      >
+        <IconGrip size={14} />
+      </button>
+
+      <button
+        onClick={() => onSelect(task.id)}
+        aria-label={isActive ? "Unset as now-focusing task" : "Set as now-focusing task"}
+        title={isActive ? "Now focusing (click to unset)" : "Set as now focusing"}
+        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-all duration-200 ${
+          isActive ? "border-ember" : "border-pine-500 hover:border-ink-faint"
+        }`}
+      >
+        <span
+          className="h-2 w-2 rounded-full bg-ember transition-transform duration-200"
+          style={{ transform: isActive ? "scale(1)" : "scale(0)" }}
+        />
+      </button>
+
+      <div className="min-w-0 flex-1">
+        <p
+          className={`truncate text-sm font-semibold transition-all duration-200 ${
+            task.done ? "text-ink-faint line-through" : "text-ink"
+          }`}
+        >
+          {task.title}
+        </p>
+        <div className="mt-1 flex items-center gap-1.5">
+          <div className="flex items-center gap-[3px]">
+            {Array.from({ length: task.est }, (_, i) => (
+              <span
+                key={i}
+                className="h-[7px] w-[7px] rounded-full transition-colors duration-300"
+                style={{ background: i < filled ? "#ff6b4a" : "#2c4233" }}
+              />
+            ))}
+          </div>
+          <span className="tabular font-mono text-[10px] text-ink-faint">
+            {task.donePomos}/{task.est}
+            {task.donePomos > task.est ? ` +${task.donePomos - task.est}` : ""}
+          </span>
+          {isActive && !task.done && (
+            <span className="ml-1 rounded-full bg-ember/15 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-ember">
+              now
+            </span>
+          )}
+        </div>
+      </div>
+
+      <button
+        onClick={() => onToggleDone(task.id)}
+        aria-label={task.done ? "Mark as not done" : "Mark as done"}
+        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border transition-all duration-200 active:scale-90 ${
+          task.done
+            ? "border-mint/50 bg-mint/15 text-mint"
+            : "border-pine-500 text-transparent hover:border-mint/60 hover:text-mint/50"
+        }`}
+      >
+        <IconCheck size={13} strokeWidth={2.6} />
+      </button>
+      <button
+        onClick={() => onDelete(task.id)}
+        aria-label="Delete task"
+        className="shrink-0 rounded-lg p-1.5 text-ink-faint opacity-0 transition-all duration-200 hover:bg-ember/10 hover:text-ember focus:opacity-100 group-hover:opacity-100"
+      >
+        <IconTrash size={15} />
+      </button>
+    </li>
+  );
+}
+
+/* ---------------- panel ---------------- */
 
 export default function TaskPanel({
   tasks,
@@ -20,9 +147,15 @@ export default function TaskPanel({
   onToggleDone,
   onDelete,
   onClearDone,
+  onReorder,
 }: Props) {
   const [title, setTitle] = useState("");
   const [est, setEst] = useState(1);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   const open = tasks.filter((t) => !t.done);
   const done = tasks.filter((t) => t.done);
@@ -36,6 +169,11 @@ export default function TaskPanel({
     onAdd(trimmed, est);
     setTitle("");
     setEst(1);
+  };
+
+  const handleDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (over && active.id !== over.id) onReorder(String(active.id), String(over.id));
   };
 
   return (
@@ -99,107 +237,44 @@ export default function TaskPanel({
         </button>
       </form>
 
-      <ul className="scroll-slim mt-4 max-h-[380px] flex-1 space-y-2 overflow-y-auto pr-1">
-        {ordered.length === 0 && (
-          <li className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-pine-600 px-6 py-10 text-center">
-            <svg viewBox="0 0 48 48" width="52" height="52" fill="none" aria-hidden="true">
-              <path
-                d="M24 14.5c-9.5 0-16 6-16 13.6 0 8 7.2 13.4 16 13.4s16-5.4 16-13.4c0-7.6-6.5-13.6-16-13.6z"
-                stroke="#34503e"
-                strokeWidth="2"
-                strokeDasharray="4 5"
-                strokeLinecap="round"
-              />
-              <path d="M24 14.5c-1.2-4 .2-7 4.5-9-.3 3.2-1.7 6.2-4.5 9z" stroke="#34503e" strokeWidth="2" strokeLinejoin="round" />
-              <path d="M24 14.5c1.2-4-.2-7-4.5-9 .3 3.2 1.7 6.2 4.5 9z" stroke="#34503e" strokeWidth="2" strokeLinejoin="round" />
-            </svg>
-            <div>
-              <p className="text-sm font-semibold text-ink-dim">Nothing on the stove</p>
-              <p className="mt-1 text-xs text-ink-faint">
-                Add a task, pick it as “now focusing”, and start the dial.
-              </p>
-            </div>
-          </li>
-        )}
-
-        {ordered.map((t) => {
-          const isActive = t.id === activeId;
-          const filled = Math.min(t.donePomos, t.est);
-          return (
-            <li
-              key={t.id}
-              className={`group flex items-center gap-3 rounded-2xl border px-3.5 py-3 transition-all duration-200 ${
-                isActive
-                  ? "border-ember/45 bg-ember/[0.06]"
-                  : "border-pine-600/70 bg-pine-800/40 hover:border-pine-500 hover:bg-pine-800/80"
-              } ${t.done ? "opacity-55" : ""}`}
-            >
-              <button
-                onClick={() => onSelect(t.id)}
-                aria-label={isActive ? "Unset as now-focusing task" : "Set as now-focusing task"}
-                title={isActive ? "Now focusing (click to unset)" : "Set as now focusing"}
-                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-all duration-200 ${
-                  isActive ? "border-ember" : "border-pine-500 hover:border-ink-faint"
-                }`}
-              >
-                <span
-                  className="h-2 w-2 rounded-full bg-ember transition-transform duration-200"
-                  style={{ transform: isActive ? "scale(1)" : "scale(0)" }}
-                />
-              </button>
-
-              <div className="min-w-0 flex-1">
-                <p
-                  className={`truncate text-sm font-semibold transition-all duration-200 ${
-                    t.done ? "text-ink-faint line-through" : "text-ink"
-                  }`}
-                >
-                  {t.title}
-                </p>
-                <div className="mt-1 flex items-center gap-1.5">
-                  <div className="flex items-center gap-[3px]">
-                    {Array.from({ length: t.est }, (_, i) => (
-                      <span
-                        key={i}
-                        className="h-[7px] w-[7px] rounded-full transition-colors duration-300"
-                        style={{ background: i < filled ? "#ff6b4a" : "#2c4233" }}
-                      />
-                    ))}
-                  </div>
-                  <span className="tabular font-mono text-[10px] text-ink-faint">
-                    {t.donePomos}/{t.est}
-                    {t.donePomos > t.est ? ` +${t.donePomos - t.est}` : ""}
-                  </span>
-                  {isActive && !t.done && (
-                    <span className="ml-1 rounded-full bg-ember/15 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-ember">
-                      now
-                    </span>
-                  )}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={ordered.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+          <ul className="scroll-slim mt-4 max-h-[380px] flex-1 space-y-2 overflow-y-auto pr-1">
+            {ordered.length === 0 && (
+              <li className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-pine-600 px-6 py-10 text-center">
+                <svg viewBox="0 0 48 48" width="52" height="52" fill="none" aria-hidden="true">
+                  <path
+                    d="M24 14.5c-9.5 0-16 6-16 13.6 0 8 7.2 13.4 16 13.4s16-5.4 16-13.4c0-7.6-6.5-13.6-16-13.6z"
+                    stroke="#34503e"
+                    strokeWidth="2"
+                    strokeDasharray="4 5"
+                    strokeLinecap="round"
+                  />
+                  <path d="M24 14.5c-1.2-4 .2-7 4.5-9-.3 3.2-1.7 6.2-4.5 9z" stroke="#34503e" strokeWidth="2" strokeLinejoin="round" />
+                  <path d="M24 14.5c1.2-4-.2-7-4.5-9 .3 3.2 1.7 6.2 4.5 9z" stroke="#34503e" strokeWidth="2" strokeLinejoin="round" />
+                </svg>
+                <div>
+                  <p className="text-sm font-semibold text-ink-dim">Nothing on the stove</p>
+                  <p className="mt-1 text-xs text-ink-faint">
+                    Add a task, pick it as “now focusing”, and start the dial.
+                  </p>
                 </div>
-              </div>
+              </li>
+            )}
 
-              <button
-                onClick={() => onToggleDone(t.id)}
-                aria-label={t.done ? "Mark as not done" : "Mark as done"}
-                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border transition-all duration-200 active:scale-90 ${
-                  t.done
-                    ? "border-mint/50 bg-mint/15 text-mint"
-                    : "border-pine-500 text-transparent hover:border-mint/60 hover:text-mint/50"
-                }`}
-              >
-                <IconCheck size={13} strokeWidth={2.6} />
-              </button>
-              <button
-                onClick={() => onDelete(t.id)}
-                aria-label="Delete task"
-                className="shrink-0 rounded-lg p-1.5 text-ink-faint opacity-0 transition-all duration-200 hover:bg-ember/10 hover:text-ember focus:opacity-100 group-hover:opacity-100"
-              >
-                <IconTrash size={15} />
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+            {ordered.map((t) => (
+              <Row
+                key={t.id}
+                task={t}
+                isActive={t.id === activeId}
+                onSelect={onSelect}
+                onToggleDone={onToggleDone}
+                onDelete={onDelete}
+              />
+            ))}
+          </ul>
+        </SortableContext>
+      </DndContext>
     </section>
   );
 }

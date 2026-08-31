@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import type { Settings } from "../lib/types";
+import { PRESETS, type Settings } from "../lib/types";
+import { playChime, playClick } from "../lib/sound";
 import { IconClose, IconMinus, IconPlus } from "./icons";
 
 interface Props {
@@ -165,7 +166,35 @@ export default function SettingsModal({
         <h3 className="mt-6 font-mono text-[11px] font-semibold uppercase tracking-[0.22em] text-ember">
           Durations
         </h3>
-        <div className="mt-1 divide-y divide-pine-700">
+        <div className="mt-3 flex flex-wrap gap-2">
+          {PRESETS.map((p) => {
+            const isApplied =
+              settings.focusMin === p.focusMin &&
+              settings.shortMin === p.shortMin &&
+              settings.longMin === p.longMin;
+            return (
+              <button
+                key={p.name}
+                onClick={() => {
+                  onPatch({ focusMin: p.focusMin, shortMin: p.shortMin, longMin: p.longMin });
+                  playClick();
+                }}
+                className={`rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-all duration-200 active:scale-95 ${
+                  isApplied
+                    ? "border-ember/55 bg-ember/12 text-ember"
+                    : "border-pine-600 bg-pine-900/70 text-ink-dim hover:border-pine-500 hover:text-ink"
+                }`}
+                title={`${p.focusMin} min focus · ${p.shortMin} short · ${p.longMin} long`}
+              >
+                {p.name}
+                <span className="tabular ml-1.5 font-mono text-[10px] font-normal opacity-70">
+                  {p.focusMin}·{p.shortMin}·{p.longMin}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-2 divide-y divide-pine-700">
           <Stepper
             label="Focus"
             hint="One deep-work tomato"
@@ -226,6 +255,36 @@ export default function SettingsModal({
             checked={settings.sound}
             onChange={(v) => onPatch({ sound: v })}
           />
+          <div className="flex items-center justify-between gap-4 py-3">
+            <div>
+              <p className="text-sm font-semibold text-ink">Chime volume</p>
+              <p className="text-xs text-ink-faint">Loudness of every ring and click</p>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={Math.round(settings.volume * 100)}
+                aria-label="Chime volume"
+                disabled={!settings.sound}
+                onChange={(e) => onPatch({ volume: Number(e.target.value) / 100 })}
+                onPointerUp={() => settings.sound && playClick()}
+                className="simmer-range w-28"
+              />
+              <span className="tabular w-9 text-right font-mono text-xs font-semibold text-ink-dim">
+                {Math.round(settings.volume * 100)}%
+              </span>
+              <button
+                onClick={() => playChime()}
+                disabled={!settings.sound}
+                className="rounded-lg border border-pine-600 bg-pine-800 px-2.5 py-1.5 text-[11px] font-bold text-ink-dim transition-all hover:border-pine-500 hover:text-ink active:scale-95 disabled:opacity-35"
+              >
+                Test
+              </button>
+            </div>
+          </div>
           <Stepper
             label="Daily goal"
             hint="Tomatoes you’re aiming for today"

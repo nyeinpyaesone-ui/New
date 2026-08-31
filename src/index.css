@@ -95,6 +95,16 @@ kbd.key {
   border-radius: 6px;
 }
 
+/* ---------- range slider ---------- */
+input.simmer-range {
+  accent-color: var(--color-ember);
+  cursor: pointer;
+}
+input.simmer-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
 /* ---------- ambient background layers ---------- */
 .bg-dots {
   background-image: radial-gradient(rgba(237, 233, 220, 0.055) 1px, transparent 1.4px);

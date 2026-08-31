@@ -9,7 +9,18 @@ export interface Settings {
   autoBreak: boolean;
   autoFocus: boolean;
   sound: boolean;
+  /** master volume for chimes, 0–1 */
+  volume: number;
   dailyGoal: number;
+}
+
+export type JournalType = "focus" | "short" | "long" | "task" | "goal";
+
+export interface JournalEvent {
+  id: string;
+  at: number;
+  type: JournalType;
+  text: string;
 }
 
 export interface Task {
@@ -52,8 +63,16 @@ export const DEFAULT_SETTINGS: Settings = {
   autoBreak: true,
   autoFocus: false,
   sound: true,
+  volume: 0.8,
   dailyGoal: 8,
 };
+
+/** one-click duration recipes */
+export const PRESETS: { name: string; focusMin: number; shortMin: number; longMin: number }[] = [
+  { name: "Classic", focusMin: 25, shortMin: 5, longMin: 15 },
+  { name: "Deep work", focusMin: 50, shortMin: 10, longMin: 20 },
+  { name: "Sprint", focusMin: 15, shortMin: 3, longMin: 10 },
+];
 
 export const MODE_META: Record<
   Mode,

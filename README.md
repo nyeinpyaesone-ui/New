@@ -11,8 +11,9 @@ backgrounded tabs.
 | Area | What you get |
 | --- | --- |
 | Timer | Focus / short-break / long-break modes, start · pause · resume · reset · skip, auto-advancing rounds with a configurable long-break cadence, timestamp-based engine that stays accurate in background tabs |
-| Customisation | Editable durations (focus 1–90 min, short 1–30, long 1–60), sessions per round, daily goal, auto-start toggles, completion sounds |
-| Tasks | Focus queue with estimated tomatoes, per-task completed-tomato tracking, a "now focusing" selection, done / delete / clear-done |
+| Customisation | Editable durations (focus 1–90 min, short 1–30, long 1–60), one-click **presets** (Classic 25·5·15, Deep work 50·10·20, Sprint 15·3·10), sessions per round, daily goal, auto-start toggles, completion sounds with a **volume slider + test chime** |
+| Tasks | Focus queue with estimated tomatoes, per-task completed-tomato tracking, a "now focusing" selection, **drag-to-reorder rows** (mouse + keyboard, via dnd-kit), done / delete / clear-done |
+| Journal | Timestamped record of every completed session, finished task and goal hit — grouped by day, capped at 60 entries, included in backups |
 | Statistics | Today's pomodoros vs. goal, focus minutes, tasks completed, day streak, animated 7-day chart, all-time rollups (total tomatoes, deep-work time, best day) |
 | Data | Everything persisted to `localStorage`, JSON backup **export / import**, two-step "erase all data", validated hydration (corrupt or hand-edited storage can't crash the app) |
 | Polish | Live countdown in the document title **and** the favicon, WebAudio chimes, toast notifications, keyboard shortcuts, error boundary with recovery, `prefers-reduced-motion` support, web manifest + SVG icon |
@@ -50,8 +51,9 @@ src/
     ModeTabs.tsx            sliding-pill mode switcher
     TimerDial.tsx           SVG dial — ticks, progress arc, halo, cycle dots
     StatsPanel.tsx          today's stats, goal bar, 7-day chart, all-time strip
-    TaskPanel.tsx           queue with estimate picker + empty state
-    SettingsModal.tsx       durations, flow toggles, backup export/import, danger zone
+    TaskPanel.tsx           draggable queue (dnd-kit) with estimate picker + empty state
+    JournalPanel.tsx        day-grouped activity log
+    SettingsModal.tsx       durations, presets, volume, flow toggles, backup export/import, danger zone
     Toasts.tsx              inline notifications
     ErrorBoundary.tsx       crash recovery UI
     icons.tsx               hand-drawn inline SVG icon set
@@ -61,9 +63,10 @@ src/
 
 | Key | Shape |
 | --- | --- |
-| `settings.v1` | `{ focusMin, shortMin, longMin, longEvery, autoBreak, autoFocus, sound, dailyGoal }` |
+| `settings.v1` | `{ focusMin, shortMin, longMin, longEvery, autoBreak, autoFocus, sound, volume, dailyGoal }` |
 | `tasks.v1` | `Task[]` — `{ id, title, est, donePomos, done, createdAt }` |
 | `history.v1` | `{ "YYYY-MM-DD": { pomos, minutes, tasksDone } }` |
+| `journal.v1` | `JournalEvent[]` — `{ id, at, type, text }`, newest first, max 60 |
 | `active.v1` | `string | null` — id of the "now focusing" task |
 | `runtime.v1` | `{ mode, secondsLeft, cyclePos }` — in-flight timer state |
 

@@ -117,8 +117,10 @@ export default function TimerDial({ mode, secondsLeft, total, isRunning, cyclePo
         <div className="flex items-center gap-2">
           {Array.from({ length: longEvery }, (_, i) => (
             <span
-              key={i}
-              className="h-2.5 w-2.5 rounded-full transition-all duration-500"
+              key={`${i}-${i < inCycle ? "on" : "off"}`}
+              className={`h-2.5 w-2.5 rounded-full transition-all duration-500 ${
+                i < inCycle ? "anim-pop" : ""
+              }`}
               style={{
                 background:
                   i < inCycle
