@@ -2,6 +2,8 @@ import {
   DEFAULT_SETTINGS,
   MODE_ORDER,
   type History,
+  type JournalEvent,
+  type JournalType,
   type Mode,
   type RuntimeState,
   type Settings,
@@ -35,8 +37,26 @@ export function sanitizeSettings(raw: unknown): Settings {
     autoBreak: typeof raw.autoBreak === "boolean" ? raw.autoBreak : d.autoBreak,
     autoFocus: typeof raw.autoFocus === "boolean" ? raw.autoFocus : d.autoFocus,
     sound: typeof raw.sound === "boolean" ? raw.sound : d.sound,
+    volume: clamp(num(raw.volume, d.volume), 0, 1),
     dailyGoal: clamp(int(num(raw.dailyGoal, d.dailyGoal)), 1, 20),
   };
+}
+
+const JOURNAL_TYPES: JournalType[] = ["focus", "short", "long", "task", "goal"];
+
+export function sanitizeJournal(raw: unknown): JournalEvent[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(isObj)
+    .map((e) => ({
+      id: typeof e.id === "string" ? e.id : "",
+      at: num(e.at, 0),
+      type: JOURNAL_TYPES.includes(e.type as JournalType) ? (e.type as JournalType) : "focus",
+      text: typeof e.text === "string" ? e.text.slice(0, 140) : "",
+    }))
+    .filter((e) => e.id !== "" && e.at > 0 && e.text !== "")
+    .sort((a, b) => b.at - a.at)
+    .slice(0, 60);
 }
 
 export function sanitizeTasks(raw: unknown): Task[] {
@@ -89,6 +109,7 @@ export interface BackupData {
   settings?: Settings;
   tasks?: Task[];
   history?: History;
+  journal?: JournalEvent[];
   activeId?: string | null;
 }
 
@@ -116,6 +137,7 @@ export function parseBackup(text: string): BackupData {
   if (d.settings !== undefined) out.settings = sanitizeSettings(d.settings);
   if (d.tasks !== undefined) out.tasks = sanitizeTasks(d.tasks);
   if (d.history !== undefined) out.history = sanitizeHistory(d.history);
+  if (d.journal !== undefined) out.journal = sanitizeJournal(d.journal);
   if (typeof d.activeId === "string" || d.activeId === null) out.activeId = d.activeId;
   if (out.settings === undefined && out.tasks === undefined && out.history === undefined) {
     throw new Error("the backup contains no recognisable data");

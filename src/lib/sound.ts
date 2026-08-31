@@ -1,4 +1,10 @@
 let ctx: AudioContext | null = null;
+let masterVolume = 0.8;
+
+/** 0–1, applied to every subsequent chime */
+export function setMasterVolume(v: number) {
+  masterVolume = Math.min(1, Math.max(0, v));
+}
 
 function ensureCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
@@ -25,8 +31,9 @@ function tone(
   o.type = type;
   o.frequency.value = freq;
   const t = c.currentTime + at;
+  const peak = Math.max(0.0001, gain * masterVolume);
   g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(gain, t + 0.02);
+  g.gain.exponentialRampToValueAtTime(peak, t + 0.02);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   o.connect(g);
   g.connect(c.destination);
