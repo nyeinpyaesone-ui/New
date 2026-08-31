@@ -11,8 +11,19 @@ export interface Settings {
   sound: boolean;
   /** master volume for chimes, 0–1 */
   volume: number;
+  ambient: Ambient;
+  notify: boolean;
   dailyGoal: number;
 }
+
+export type Ambient = "off" | "rain" | "cafe" | "drone";
+
+export const AMBIENTS: { id: Ambient; label: string }[] = [
+  { id: "off", label: "Off" },
+  { id: "rain", label: "Rain" },
+  { id: "cafe", label: "Café" },
+  { id: "drone", label: "Deep flow" },
+];
 
 export type JournalType = "focus" | "short" | "long" | "task" | "goal";
 
@@ -64,6 +75,8 @@ export const DEFAULT_SETTINGS: Settings = {
   autoFocus: false,
   sound: true,
   volume: 0.8,
+  ambient: "off",
+  notify: false,
   dailyGoal: 8,
 };
 

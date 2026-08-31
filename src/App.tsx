@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import confetti from "canvas-confetti";
 import { arrayMove } from "@dnd-kit/sortable";
 import {
+  AMBIENTS,
   DEFAULT_SETTINGS,
   MODE_META,
   type History,
@@ -15,6 +16,8 @@ import {
 } from "./lib/types";
 import { computeStreak, formatClock, todayKey } from "./lib/dates";
 import { playBreakEnd, playChime, playClick, setMasterVolume } from "./lib/sound";
+import { setAmbient, setAmbientVolume } from "./lib/ambient";
+import { maybeNotify } from "./lib/notify";
 import { eraseKeys, useLocalStorage } from "./hooks/useLocalStorage";
 import {
   parseBackup,
@@ -32,9 +35,11 @@ import StatsPanel from "./components/StatsPanel";
 import TaskPanel from "./components/TaskPanel";
 import JournalPanel from "./components/JournalPanel";
 import SettingsModal from "./components/SettingsModal";
+import ShortcutsOverlay from "./components/ShortcutsOverlay";
 import Toasts from "./components/Toasts";
 import {
   IconGear,
+  IconKeyboard,
   IconPause,
   IconPlay,
   IconReset,
@@ -80,6 +85,7 @@ export default function App() {
   );
   const [isRunning, setIsRunning] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const { mode, secondsLeft, cyclePos } = runtime;
@@ -117,7 +123,14 @@ export default function App() {
   /* ---------------- chime volume ---------------- */
   useEffect(() => {
     setMasterVolume(settings.volume);
+    setAmbientVolume(settings.volume);
   }, [settings.volume]);
+
+  /* ---------------- ambient soundscape ---------------- */
+  useEffect(() => {
+    setAmbient(settings.ambient, settings.volume);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.ambient]);
 
   /* ---------------- session completion ---------------- */
   const finishSession = (crediting: boolean) => {
@@ -154,12 +167,16 @@ export default function App() {
           : "Skipped ahead to a break — nothing logged",
         next,
       );
+      if (settings.notify && crediting) {
+        maybeNotify("Simmer — tomato logged", `Take a ${next === "long" ? "long" : "short"} break. You earned it.`);
+      }
     } else {
       logEvent(mode, `${mode === "long" ? "Long break" : "Short break"} · ${settings[MODE_META[mode].durKey]} min`);
       if (settings.sound) playBreakEnd();
       setRuntime({ mode: "focus", secondsLeft: dur("focus"), cyclePos });
       setIsRunning(settings.autoFocus);
       addToast("Break over — back to the stove", "focus");
+      if (settings.notify) maybeNotify("Simmer — break over", "Back to the stove. One tomato at a time.");
     }
   };
   const finishRef = useRef(finishSession);
@@ -233,7 +250,7 @@ export default function App() {
   /* ---------------- keyboard shortcuts ---------------- */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (settingsOpen) return;
+      if (settingsOpen || shortcutsOpen) return;
       const el = e.target as HTMLElement | null;
       if (
         el &&
@@ -243,6 +260,11 @@ export default function App() {
           el.isContentEditable)
       )
         return;
+      if (e.key === "?") {
+        e.preventDefault();
+        setShortcutsOpen(true);
+        return;
+      }
       if (e.code === "Space") {
         e.preventDefault();
         toggle();
@@ -293,6 +315,11 @@ export default function App() {
         return { ...h, [k]: { ...d, tasksDone: d.tasksDone + 1 } };
       });
       logEvent("task", `Done — “${task.title}”`);
+      /* keep the momentum: hand the dial to the next open task */
+      if (activeId === id) {
+        const next = tasks.find((t) => t.id !== id && !t.done);
+        setActiveId(next?.id ?? null);
+      }
     }
   };
 
@@ -416,6 +443,14 @@ export default function App() {
 
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setShortcutsOpen(true)}
+              aria-label="Show keyboard shortcuts"
+              title="Keyboard shortcuts (?)"
+              className="rounded-xl border border-pine-600 bg-pine-800 p-2.5 text-ink-dim transition-all duration-200 hover:border-pine-500 hover:text-ink active:scale-90"
+            >
+              <IconKeyboard size={18} />
+            </button>
+            <button
               onClick={() => patchSettings({ sound: !settings.sound })}
               aria-label={settings.sound ? "Mute completion sounds" : "Unmute completion sounds"}
               title={settings.sound ? "Sounds on" : "Sounds off"}
@@ -492,6 +527,38 @@ export default function App() {
               </button>
             </div>
 
+            {/* ambient soundscape */}
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+              <span className="mr-1 font-mono text-[10px] font-semibold uppercase tracking-[0.24em] text-ink-faint">
+                Ambient
+              </span>
+              {AMBIENTS.map((a) => {
+                const active = settings.ambient === a.id;
+                return (
+                  <button
+                    key={a.id}
+                    onClick={() => patchSettings({ ambient: a.id })}
+                    aria-pressed={active}
+                    title={active ? `Stop ${a.label}` : `Play ${a.label}`}
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all duration-200 active:scale-95 ${
+                      active
+                        ? "border-sky/55 bg-sky/10 text-sky shadow-[0_0_16px_-6px_rgba(125,165,255,0.55)]"
+                        : "border-pine-600 text-ink-faint hover:border-pine-500 hover:text-ink-dim"
+                    }`}
+                  >
+                    {active && a.id !== "off" && (
+                      <span className="flex h-3 items-end gap-[2.5px]" aria-hidden="true">
+                        <span className="anim-eq h-full w-[2.5px] rounded-full bg-sky" style={{ animationDelay: "0s" }} />
+                        <span className="anim-eq h-full w-[2.5px] rounded-full bg-sky" style={{ animationDelay: "0.18s" }} />
+                        <span className="anim-eq h-full w-[2.5px] rounded-full bg-sky" style={{ animationDelay: "0.36s" }} />
+                      </span>
+                    )}
+                    {a.label}
+                  </button>
+                );
+              })}
+            </div>
+
             {/* now-focusing chip */}
             <div className="mt-6 flex justify-center px-4">
               {activeTask ? (
@@ -548,6 +615,9 @@ export default function App() {
             <span className="flex items-center gap-1.5">
               <kbd className="key">1–3</kbd> modes
             </span>
+            <span className="flex items-center gap-1.5">
+              <kbd className="key">?</kbd> shortcuts
+            </span>
           </div>
           <p className="font-mono text-[11px] uppercase tracking-wider">
             data stays in this browser · no account, no cloud
@@ -563,7 +633,9 @@ export default function App() {
         onEraseAll={eraseAll}
         onExport={exportBackup}
         onImport={importBackup}
+        onToast={(m) => addToast(m, "info")}
       />
+      <ShortcutsOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <Toasts toasts={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
     </div>
   );

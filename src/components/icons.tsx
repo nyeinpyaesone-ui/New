@@ -128,6 +128,13 @@ export const IconClose = (p: IconProps) => (
   </Base>
 );
 
+export const IconKeyboard = (p: IconProps) => (
+  <Base {...p}>
+    <rect x="2.5" y="6" width="19" height="12" rx="2.2" />
+    <path d="M6 9.8h.01M9.3 9.8h.01M12.6 9.8h.01M15.9 9.8h.01M6 12.9h.01M18 12.9h.01M8.8 12.9h6.4" />
+  </Base>
+);
+
 export const IconGrip = (p: IconProps) => (
   <Base {...p}>
     <circle cx="9" cy="6" r="1" fill="currentColor" stroke="none" />
