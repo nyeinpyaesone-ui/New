@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { Analytics } from '@vercel/analytics/react';
 import confetti from "canvas-confetti";
 import { arrayMove } from "@dnd-kit/sortable";
 import {
@@ -637,6 +638,7 @@ export default function App() {
       />
       <ShortcutsOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <Toasts toasts={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
+      <Analytics />
     </div>
   );
 }
