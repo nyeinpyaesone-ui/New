@@ -1,0 +1,17 @@
+{
+  "name": "Simmer — Pomodoro Focus Desk",
+  "short_name": "Simmer",
+  "description": "Focus sessions, breaks, a task queue and daily focus stats. Data stays in your browser.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0b1411",
+  "theme_color": "#0b1411",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
