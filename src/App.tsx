@@ -1,642 +1,340 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
-import confetti from "canvas-confetti";
-import { arrayMove } from "@dnd-kit/sortable";
-import {
-  AMBIENTS,
-  DEFAULT_SETTINGS,
-  MODE_META,
-  type History,
-  type JournalEvent,
-  type JournalType,
-  type Mode,
-  type RuntimeState,
-  type Settings,
-  type Task,
-  type Toast,
-} from "./lib/types";
-import { computeStreak, formatClock, todayKey } from "./lib/dates";
-import { playBreakEnd, playChime, playClick, setMasterVolume } from "./lib/sound";
-import { setAmbient, setAmbientVolume } from "./lib/ambient";
-import { maybeNotify } from "./lib/notify";
-import { eraseKeys, useLocalStorage } from "./hooks/useLocalStorage";
-import {
-  parseBackup,
-  sanitizeHistory,
-  sanitizeJournal,
-  sanitizeRuntime,
-  sanitizeSettings,
-  sanitizeTasks,
-  serializeBackup,
-} from "./lib/data";
-import { resetFavicon, setFavicon } from "./lib/favicon";
-import ModeTabs from "./components/ModeTabs";
-import TimerDial from "./components/TimerDial";
-import StatsPanel from "./components/StatsPanel";
-import TaskPanel from "./components/TaskPanel";
-import JournalPanel from "./components/JournalPanel";
-import SettingsModal from "./components/SettingsModal";
-import ShortcutsOverlay from "./components/ShortcutsOverlay";
-import Toasts from "./components/Toasts";
-import {
-  IconGear,
-  IconKeyboard,
-  IconPause,
-  IconPlay,
-  IconReset,
-  IconSkip,
-  IconTomato,
-  IconVolume,
-  IconVolumeOff,
-} from "./components/icons";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FORMATS, type SectionDef } from "./docs/formats";
+import { PROTOCOLS } from "./docs/protocols";
+import { IconAnchor, IconBranch, IconCheck, IconFileBin, IconPrompt, IconSearch, IconWire } from "./components/icons";
 
-const KEYS = [
-  "simmer.settings.v1",
-  "simmer.tasks.v1",
-  "simmer.history.v1",
-  "simmer.journal.v1",
-  "simmer.active.v1",
-  "simmer.runtime.v1",
+const SECTIONS: SectionDef[] = [...FORMATS, ...PROTOCOLS];
+
+/** magic constants that jump straight to the page that explains them */
+const MAGIC_CHIPS: { magic: string; section: string; hint: string }[] = [
+  { magic: "PACK", section: "format-pack", hint: "packfile header" },
+  { magic: "DIRC", section: "format-index", hint: "index header" },
+  { magic: "CGPH", section: "format-commit-graph", hint: "commit-graph" },
+  { magic: "ff 74 4f 63", section: "format-pack", hint: "pack index v2" },
+  { magic: "# v2 git bundle", section: "format-bundle", hint: "bundle magic" },
+  { magic: "0000", section: "protocol-common", hint: "flush-pkt" },
+  { magic: "version 2", section: "protocol-v2", hint: "v2 handshake" },
 ];
 
-const makeId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+function useScrollSpy(ids: string[]): string {
+  const [active, setActive] = useState(ids[0] ?? "");
+  useEffect(() => {
+    const visible = new Map<string, number>();
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) visible.set(e.target.id, e.boundingClientRect.top);
+          else visible.delete(e.target.id);
+        }
+        if (visible.size === 0) return;
+        const top = [...visible.entries()].sort((a, b) => a[1] - b[1])[0][0];
+        setActive(top);
+      },
+      { rootMargin: "-15% 0px -70% 0px" },
+    );
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el) obs.observe(el);
+    }
+    return () => obs.disconnect();
+  }, [ids]);
+  return active;
+}
+
+function SectionAnchor({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      aria-label="Copy link to this section"
+      onClick={() => {
+        void navigator.clipboard?.writeText(`${location.href.split("#")[0]}#${id}`);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1200);
+      }}
+      className="group/anchor flex items-center gap-1.5 rounded-md border border-transparent px-1.5 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-faint opacity-0 transition-all duration-200 hover:border-line hover:text-flare focus-visible:opacity-100 group-hover/heading:opacity-100"
+    >
+      {copied ? <IconCheck size={12} className="text-seafoam" /> : <IconAnchor size={12} />}
+      {copied ? "copied" : "link"}
+    </button>
+  );
+}
 
 export default function App() {
-  const [settings, setSettings] = useLocalStorage<Settings>(
-    "simmer.settings.v1",
-    DEFAULT_SETTINGS,
-    sanitizeSettings,
-  );
-  const [tasks, setTasks] = useLocalStorage<Task[]>("simmer.tasks.v1", [], sanitizeTasks);
-  const [history, setHistory] = useLocalStorage<History>("simmer.history.v1", {}, sanitizeHistory);
-  const [activeId, setActiveId] = useLocalStorage<string | null>("simmer.active.v1", null);
-  const [runtime, setRuntime] = useLocalStorage<RuntimeState>(
-    "simmer.runtime.v1",
-    {
-      mode: "focus",
-      secondsLeft: DEFAULT_SETTINGS.focusMin * 60,
-      cyclePos: 0,
-    },
-    (raw) => sanitizeRuntime(raw, settings),
-  );
-  const [journal, setJournal] = useLocalStorage<JournalEvent[]>(
-    "simmer.journal.v1",
-    [],
-    sanitizeJournal,
-  );
-  const [isRunning, setIsRunning] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [query, setQuery] = useState("");
+  const [progress, setProgress] = useState(0);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const activeIds = useMemo(() => SECTIONS.map((s) => s.id), []);
+  const active = useScrollSpy(activeIds);
 
-  const { mode, secondsLeft, cyclePos } = runtime;
-  const dur = (m: Mode) => settings[MODE_META[m].durKey] * 60;
-  const total = dur(mode);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return SECTIONS;
+    return SECTIONS.filter(
+      (s) =>
+        s.id.toLowerCase().includes(q) ||
+        s.title.toLowerCase().includes(q) ||
+        s.keywords.some((k) => k.toLowerCase().includes(q)),
+    );
+  }, [query]);
 
-  /* ---------------- toasts ---------------- */
-  const toastId = useRef(0);
-  const addToast = (msg: string, kind: Toast["kind"]) => {
-    const id = ++toastId.current;
-    setToasts((t) => [...t.slice(-2), { id, msg, kind }]);
-    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
-  };
-
-  /* ---------------- journal ---------------- */
-  const logEvent = (type: JournalType, text: string) => {
-    setJournal((j) => [{ id: makeId(), at: Date.now(), type, text }, ...j].slice(0, 60));
-  };
-
-  /* ---------------- celebration ---------------- */
-  const burst = (particleCount: number, origin: { x: number; y: number }, angle?: number) => {
-    confetti({
-      particleCount,
-      spread: 72,
-      startVelocity: 32,
-      scalar: 0.85,
-      ticks: 140,
-      origin,
-      ...(angle !== undefined ? { angle } : {}),
-      colors: ["#ff6b4a", "#ffb35c", "#4fd6a4", "#7da5ff", "#ede9dc"],
-      disableForReducedMotion: true,
-    });
-  };
-
-  /* ---------------- chime volume ---------------- */
+  /* reading progress */
   useEffect(() => {
-    setMasterVolume(settings.volume);
-    setAmbientVolume(settings.volume);
-  }, [settings.volume]);
+    let raf = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const doc = document.documentElement;
+        const max = doc.scrollHeight - doc.clientHeight;
+        setProgress(max > 0 ? Math.min(100, (doc.scrollTop / max) * 100) : 0);
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(raf);
+    };
+  }, []);
 
-  /* ---------------- ambient soundscape ---------------- */
+  /* scroll reveals */
   useEffect(() => {
-    setAmbient(settings.ambient, settings.volume);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.ambient]);
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            e.target.classList.add("in");
+            obs.unobserve(e.target);
+          }
+        }
+      },
+      { rootMargin: "0px 0px -8% 0px" },
+    );
+    document.querySelectorAll(".reveal").forEach((el) => obs.observe(el));
+    return () => obs.disconnect();
+  }, [filtered]);
 
-  /* ---------------- session completion ---------------- */
-  const finishSession = (crediting: boolean) => {
-    if (mode === "focus") {
-      let nextCycle = cyclePos;
-      if (crediting) {
-        nextCycle = cyclePos + 1;
-        const k = todayKey();
-        setHistory((h) => {
-          const d = h[k] ?? { pomos: 0, minutes: 0, tasksDone: 0 };
-          return { ...h, [k]: { ...d, pomos: d.pomos + 1, minutes: d.minutes + settings.focusMin } };
-        });
-        setTasks((ts) =>
-          ts.map((t) => (t.id === activeId && !t.done ? { ...t, donePomos: t.donePomos + 1 } : t)),
-        );
-        const focusingOn = tasks.find((t) => t.id === activeId && !t.done);
-        logEvent(
-          "focus",
-          focusingOn
-            ? `Focus · ${settings.focusMin} min on “${focusingOn.title}”`
-            : `Focus · ${settings.focusMin} min`,
-        );
-        burst(45, { x: 0.5, y: 0.32 });
-        if (settings.sound) playChime();
-      } else if (settings.sound) {
-        playClick();
-      }
-      const next: Mode = crediting && nextCycle % settings.longEvery === 0 ? "long" : "short";
-      setRuntime({ mode: next, secondsLeft: dur(next), cyclePos: nextCycle });
-      setIsRunning(crediting && settings.autoBreak);
-      addToast(
-        crediting
-          ? `Tomato logged — take a ${next === "long" ? "long" : "short"} break`
-          : "Skipped ahead to a break — nothing logged",
-        next,
-      );
-      if (settings.notify && crediting) {
-        maybeNotify("Simmer — tomato logged", `Take a ${next === "long" ? "long" : "short"} break. You earned it.`);
-      }
-    } else {
-      logEvent(mode, `${mode === "long" ? "Long break" : "Short break"} · ${settings[MODE_META[mode].durKey]} min`);
-      if (settings.sound) playBreakEnd();
-      setRuntime({ mode: "focus", secondsLeft: dur("focus"), cyclePos });
-      setIsRunning(settings.autoFocus);
-      addToast("Break over — back to the stove", "focus");
-      if (settings.notify) maybeNotify("Simmer — break over", "Back to the stove. One tomato at a time.");
-    }
-  };
-  const finishRef = useRef(finishSession);
-  finishRef.current = finishSession;
-
-  /* ---------------- ticking engine (timestamp based — tab safe) ---------------- */
-  useEffect(() => {
-    if (!isRunning) return;
-    const endAt = Date.now() + secondsLeft * 1000;
-    let fired = false;
-    const id = window.setInterval(() => {
-      const remain = Math.round((endAt - Date.now()) / 1000);
-      if (remain <= 0) {
-        if (fired) return;
-        fired = true;
-        window.clearInterval(id);
-        setIsRunning(false);
-        setRuntime((r) => ({ ...r, secondsLeft: 0 }));
-        finishRef.current(true);
-      } else {
-        setRuntime((r) => (r.secondsLeft === remain ? r : { ...r, secondsLeft: remain }));
-      }
-    }, 250);
-    return () => window.clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isRunning, mode]);
-
-  /* ---------------- controls ---------------- */
-  const toggle = () => {
-    if (settings.sound) playClick();
-    if (isRunning) {
-      setIsRunning(false);
-    } else {
-      if (secondsLeft <= 0) setRuntime((r) => ({ ...r, secondsLeft: dur(r.mode) }));
-      setIsRunning(true);
-    }
-  };
-
-  const reset = () => {
-    setIsRunning(false);
-    setRuntime((r) => ({ ...r, secondsLeft: dur(r.mode) }));
-  };
-
-  const skip = () => finishSession(false);
-
-  const switchMode = (m: Mode) => {
-    if (m === mode) return;
-    setIsRunning(false);
-    setRuntime((r) => ({ ...r, mode: m, secondsLeft: dur(m) }));
-  };
-
-  /* durations edited while idle → re-seat the dial */
-  useEffect(() => {
-    if (!isRunning) setRuntime((r) => ({ ...r, secondsLeft: dur(r.mode) }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings]);
-
-  /* ---------------- document title + live favicon ---------------- */
-  const engaged = isRunning || secondsLeft < total;
-  useEffect(() => {
-    document.title = engaged
-      ? `${formatClock(secondsLeft)} · ${MODE_META[mode].label} — Simmer`
-      : "Simmer — Pomodoro Focus Desk";
-    if (engaged) {
-      setFavicon(mode, total > 0 ? secondsLeft / total : 1, Math.max(1, Math.ceil(secondsLeft / 60)));
-    } else {
-      resetFavicon();
-    }
-  }, [secondsLeft, mode, isRunning, total, engaged]);
-
-  /* ---------------- keyboard shortcuts ---------------- */
+  /* "/" focuses the filter */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (settingsOpen || shortcutsOpen) return;
       const el = e.target as HTMLElement | null;
-      if (
-        el &&
-        (el.tagName === "INPUT" ||
-          el.tagName === "TEXTAREA" ||
-          el.tagName === "SELECT" ||
-          el.isContentEditable)
-      )
-        return;
-      if (e.key === "?") {
-        e.preventDefault();
-        setShortcutsOpen(true);
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
+        if (e.key === "Escape") (el as HTMLInputElement).blur();
         return;
       }
-      if (e.code === "Space") {
+      if (e.key === "/") {
         e.preventDefault();
-        toggle();
-      } else if (e.key === "r" || e.key === "R") reset();
-      else if (e.key === "s" || e.key === "S") skip();
-      else if (e.key === "1") switchMode("focus");
-      else if (e.key === "2") switchMode("short");
-      else if (e.key === "3") switchMode("long");
+        searchRef.current?.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  });
+  }, []);
 
-  /* ---------------- daily goal celebration ---------------- */
-  const todayPomos = history[todayKey()]?.pomos ?? 0;
-  const prevPomosRef = useRef(todayPomos);
-  useEffect(() => {
-    if (
-      todayPomos > 0 &&
-      todayPomos >= settings.dailyGoal &&
-      prevPomosRef.current < settings.dailyGoal
-    ) {
-      addToast(`Daily goal of ${settings.dailyGoal} tomatoes reached — splendid`, "focus");
-      logEvent("goal", `Daily goal of ${settings.dailyGoal} tomatoes reached`);
-      burst(90, { x: 0, y: 0.65 }, 60);
-      window.setTimeout(() => burst(90, { x: 1, y: 0.65 }, 120), 220);
-    }
-    prevPomosRef.current = todayPomos;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [todayPomos, settings.dailyGoal]);
+  const jump = useCallback((id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
 
-  /* ---------------- task operations ---------------- */
-  const addTask = (title: string, est: number) => {
-    const t: Task = { id: makeId(), title, est, donePomos: 0, done: false, createdAt: Date.now() };
-    setTasks((ts) => [...ts, t]);
-    setActiveId((cur) => cur ?? t.id);
-  };
+  const formatSections = filtered.filter((s) => s.group === "formats");
+  const protocolSections = filtered.filter((s) => s.group === "protocols");
 
-  const toggleDone = (id: string) => {
-    const task = tasks.find((t) => t.id === id);
-    if (!task) return;
-    const markingDone = !task.done;
-    setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, done: markingDone } : t)));
-    if (markingDone) {
-      const k = todayKey();
-      setHistory((h) => {
-        const d = h[k] ?? { pomos: 0, minutes: 0, tasksDone: 0 };
-        return { ...h, [k]: { ...d, tasksDone: d.tasksDone + 1 } };
-      });
-      logEvent("task", `Done — “${task.title}”`);
-      /* keep the momentum: hand the dial to the next open task */
-      if (activeId === id) {
-        const next = tasks.find((t) => t.id !== id && !t.done);
-        setActiveId(next?.id ?? null);
-      }
-    }
-  };
-
-  const reorderTasks = (draggedId: string, overId: string) => {
-    setTasks((ts) => {
-      const from = ts.findIndex((t) => t.id === draggedId);
-      const to = ts.findIndex((t) => t.id === overId);
-      if (from < 0 || to < 0 || from === to) return ts;
-      return arrayMove(ts, from, to);
-    });
-  };
-
-  const clearJournal = () => setJournal([]);
-
-  const deleteTask = (id: string) => {
-    setTasks((ts) => ts.filter((t) => t.id !== id));
-    if (activeId === id) setActiveId(null);
-  };
-
-  const clearDone = () => setTasks((ts) => ts.filter((t) => !t.done));
-
-  /* ---------------- settings & data ---------------- */
-  const patchSettings = (p: Partial<Settings>) => setSettings((s) => ({ ...s, ...p }));
-
-  const eraseAll = () => {
-    eraseKeys(KEYS);
-    setSettings(DEFAULT_SETTINGS);
-    setTasks([]);
-    setHistory({});
-    setJournal([]);
-    setActiveId(null);
-    setRuntime({ mode: "focus", secondsLeft: DEFAULT_SETTINGS.focusMin * 60, cyclePos: 0 });
-    setIsRunning(false);
-    addToast("All data erased — a fresh start", "info");
-  };
-
-  /* ---------------- backup export / import ---------------- */
-  const exportBackup = () => {
-    try {
-      const blob = new Blob([serializeBackup({ settings, tasks, history, journal, activeId })], {
-        type: "application/json",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `simmer-backup-${todayKey()}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 800);
-      addToast("Backup downloaded — keep it somewhere safe", "info");
-    } catch {
-      addToast("Export failed — your browser blocked the download", "info");
-    }
-  };
-
-  const importBackup = (text: string) => {
-    try {
-      const data = parseBackup(text);
-      setIsRunning(false);
-      if (data.settings) setSettings(data.settings);
-      if (data.tasks) setTasks(data.tasks);
-      if (data.history) setHistory(data.history);
-      if (data.journal) setJournal(data.journal);
-      if (data.activeId !== undefined) {
-        const stillValid =
-          data.activeId === null ||
-          (data.tasks ?? tasks).some((t) => t.id === data.activeId && !t.done);
-        setActiveId(stillValid ? data.activeId : null);
-      }
-      const focusMin = data.settings?.focusMin ?? settings.focusMin;
-      setRuntime({ mode: "focus", secondsLeft: focusMin * 60, cyclePos: 0 });
-      addToast("Backup restored — welcome back", "info");
-    } catch (err) {
-      addToast(`Import failed — ${err instanceof Error ? err.message : "unreadable file"}`, "info");
-    }
-  };
-
-  const activeTask = tasks.find((t) => t.id === activeId && !t.done) ?? null;
-  const streak = computeStreak(history);
-  const started = secondsLeft < total;
-
-  /* ================= render ================= */
   return (
-    <div
-      className="relative min-h-screen overflow-x-clip font-body text-ink"
-      style={{ "--accent": MODE_META[mode].color } as CSSProperties}
-    >
-      {/* ambient layered background */}
-      <div className="pointer-events-none fixed inset-0" aria-hidden="true">
-        <div className="absolute inset-0 bg-pine-950" />
+    <div className="min-h-screen">
+      {/* reading progress */}
+      <div className="fixed inset-x-0 top-0 z-50 h-[3px] bg-transparent">
         <div
-          className="anim-drift absolute -top-72 left-1/2 h-[46rem] w-[46rem] -translate-x-1/2 rounded-full blur-[130px] transition-colors duration-1000"
-          style={{ background: "var(--accent)", opacity: isRunning ? 0.2 : 0.13 }}
+          className="h-full bg-gitorange shadow-[0_0_12px_rgba(240,80,51,0.7)] transition-[width] duration-150 ease-out"
+          style={{ width: `${progress}%` }}
         />
-        <div className="absolute -bottom-44 -left-44 h-[26rem] w-[26rem] rounded-full bg-mint opacity-[0.05] blur-[120px]" />
-        <div className="absolute -right-36 top-1/3 h-80 w-80 rounded-full bg-sky opacity-[0.06] blur-[110px]" />
-        <div className="bg-dots absolute inset-0" />
-        <div className="bg-grain absolute inset-0" />
       </div>
 
-      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-6xl flex-col px-5 pb-8 pt-6 sm:px-8">
-        {/* header */}
-        <header className="anim-rise flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span
-              className="flex h-11 w-11 items-center justify-center rounded-2xl border border-pine-600 bg-pine-800 text-ember shadow-[0_8px_24px_-10px_rgba(255,107,74,0.5)]"
-              style={{ "--leaf": "#4fd6a4" } as CSSProperties}
-            >
-              <IconTomato size={26} />
-            </span>
-            <div>
-              <p className="font-display text-2xl font-extrabold leading-none tracking-tight text-ink">
-                Simmer
-              </p>
-              <p className="mt-1 font-mono text-[10px] font-medium uppercase tracking-[0.28em] text-ink-faint">
-                pomodoro focus desk
-              </p>
-            </div>
+      <div className="mx-auto max-w-[1240px] px-4 sm:px-6 lg:px-8">
+        {/* ---------- man-page masthead ---------- */}
+        <header className="man-rule pb-5 pt-7">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 font-mono text-[11px] font-bold uppercase tracking-[0.22em] text-fog">
+            <span>GITFIELD(5)</span>
+            <span className="hidden text-dim sm:inline">Git Internals Manual</span>
+            <span className="text-dim">File Formats &amp; Wire Protocols</span>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShortcutsOpen(true)}
-              aria-label="Show keyboard shortcuts"
-              title="Keyboard shortcuts (?)"
-              className="rounded-xl border border-pine-600 bg-pine-800 p-2.5 text-ink-dim transition-all duration-200 hover:border-pine-500 hover:text-ink active:scale-90"
-            >
-              <IconKeyboard size={18} />
-            </button>
-            <button
-              onClick={() => patchSettings({ sound: !settings.sound })}
-              aria-label={settings.sound ? "Mute completion sounds" : "Unmute completion sounds"}
-              title={settings.sound ? "Sounds on" : "Sounds off"}
-              className={`rounded-xl border p-2.5 transition-all duration-200 active:scale-90 ${
-                settings.sound
-                  ? "border-pine-600 bg-pine-800 text-ink-dim hover:border-pine-500 hover:text-ink"
-                  : "border-pine-700 bg-transparent text-ink-faint hover:text-ink-dim"
-              }`}
-            >
-              {settings.sound ? <IconVolume size={18} /> : <IconVolumeOff size={18} />}
-            </button>
-            <button
-              onClick={() => setSettingsOpen(true)}
-              aria-label="Open settings"
-              title="Settings"
-              className="rounded-xl border border-pine-600 bg-pine-800 p-2.5 text-ink-dim transition-all duration-300 hover:rotate-45 hover:border-pine-500 hover:text-ink active:scale-90"
-            >
-              <IconGear size={18} />
-            </button>
+          <div className="mt-6 grid items-end gap-8 lg:grid-cols-[1.5fr_1fr]">
+            <div>
+              <p className="kicker flex items-center gap-2.5">
+                <IconBranch size={15} />
+                eleven pages of plumbing, annotated
+              </p>
+              <h1 className="mt-3 font-display text-[clamp(2.4rem,5.4vw,4.1rem)] font-bold leading-[1.02] tracking-tight text-chalk">
+                The Git Internals
+                <br />
+                Field Guide<span className="cursor-blink ml-2" />
+              </h1>
+              <p className="mt-4 max-w-[56ch] text-[15.5px] leading-relaxed text-fog">
+                What <strong className="text-chalk">PACK</strong>, <strong className="text-chalk">DIRC</strong> and{" "}
+                <strong className="text-chalk">0000</strong> actually mean — byte layouts for the on-disk formats, frame-by-frame
+                walkthroughs of the wire protocols, and two live decoders to play with.
+              </p>
+
+              {/* magic chip strip */}
+              <div className="mt-6 flex flex-wrap items-center gap-2">
+                <span className="mr-1 font-mono text-[10px] font-bold uppercase tracking-[0.24em] text-faint">
+                  recognise a magic?
+                </span>
+                {MAGIC_CHIPS.map((c) => (
+                  <button
+                    key={c.magic}
+                    onClick={() => jump(c.section)}
+                    title={c.hint}
+                    className="rounded-md border border-line bg-hull/70 px-2.5 py-1 font-mono text-[11.5px] font-semibold text-chalkcyan transition-all duration-200 hover:-translate-y-0.5 hover:border-gitorange/70 hover:bg-gitorange/10 hover:text-flare active:scale-95"
+                  >
+                    {c.magic}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* specimen card */}
+            <div className="panel relative overflow-hidden p-4">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[10px] font-bold uppercase tracking-[0.22em] text-dim">
+                  specimen · head of a packfile
+                </span>
+                <IconFileBin size={15} className="text-gitorange" />
+              </div>
+              <pre className="mt-3 font-mono text-[12px] leading-[2] text-fog">
+                <span className="text-flare">50 41 43 4b</span> <span className="text-chalkcyan">00 00 00 02</span>{" "}
+                <span className="text-seafoam">00 00 00 03</span>
+                {"\n"}
+                <span className="text-dim">P  A  C  K</span> <span className="text-dim">version: 2</span> {"   "}
+                <span className="text-dim">objects: 3</span>
+              </pre>
+              <div className="wire mt-3" />
+              <p className="mt-2.5 font-mono text-[10.5px] leading-relaxed text-faint">
+                twelve bytes decide everything — feed them to the decoder on the{" "}
+                <button onClick={() => jump("format-pack")} className="text-flare underline decoration-gitorange/50 underline-offset-2 transition-colors hover:text-chalk">
+                  gitformat-pack
+                </button>{" "}
+                page.
+              </p>
+            </div>
           </div>
         </header>
 
-        {/* main */}
-        <main className="mt-7 grid flex-1 items-start gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
-          {/* timer side */}
-          <section
-            className="panel anim-rise relative overflow-hidden px-5 py-7 sm:px-8"
-            style={{ animationDelay: "0.05s" }}
-            aria-label="Pomodoro timer"
-          >
-            <ModeTabs mode={mode} onChange={switchMode} />
-
-            <div className="mt-7">
-              <TimerDial
-                mode={mode}
-                secondsLeft={secondsLeft}
-                total={total}
-                isRunning={isRunning}
-                cyclePos={cyclePos}
-                longEvery={settings.longEvery}
+        {/* ---------- body ---------- */}
+        <div className="grid gap-10 py-8 lg:grid-cols-[248px_1fr]">
+          {/* sidebar */}
+          <nav className="lg:sticky lg:top-6 lg:h-fit lg:self-start" aria-label="Manual pages">
+            <div className="relative">
+              <IconSearch size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="filter pages…  ( / )"
+                aria-label="Filter manual pages"
+                className="w-full rounded-lg border border-line bg-deck/80 py-2 pl-9 pr-8 font-mono text-[12px] text-chalk placeholder-faint transition-all focus:border-gitorange/70 focus:shadow-[0_0_0_3px_rgba(240,80,51,0.15)] focus:outline-none"
               />
-            </div>
-
-            {/* controls */}
-            <div className="mt-8 flex items-center justify-center gap-3.5">
-              <button
-                onClick={reset}
-                aria-label="Reset timer"
-                title="Reset (R)"
-                className="rounded-full border border-pine-600 bg-pine-800/70 p-3.5 text-ink-dim transition-all duration-200 hover:border-pine-500 hover:text-ink active:scale-90"
-              >
-                <IconReset size={20} />
-              </button>
-
-              <button
-                onClick={toggle}
-                className="font-display flex items-center gap-2.5 rounded-full px-10 py-3.5 text-lg font-bold tracking-tight text-pine-950 transition-all duration-200 hover:brightness-110 active:scale-95"
-                style={{
-                  background: "var(--accent)",
-                  boxShadow: "0 14px 36px -12px color-mix(in srgb, var(--accent) 65%, transparent)",
-                }}
-              >
-                {isRunning ? <IconPause size={20} /> : <IconPlay size={20} />}
-                {isRunning ? "Pause" : started ? "Resume" : "Start"}
-              </button>
-
-              <button
-                onClick={skip}
-                aria-label="Skip to next session"
-                title="Skip (S)"
-                className="rounded-full border border-pine-600 bg-pine-800/70 p-3.5 text-ink-dim transition-all duration-200 hover:border-pine-500 hover:text-ink active:scale-90"
-              >
-                <IconSkip size={20} />
-              </button>
-            </div>
-
-            {/* ambient soundscape */}
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-              <span className="mr-1 font-mono text-[10px] font-semibold uppercase tracking-[0.24em] text-ink-faint">
-                Ambient
-              </span>
-              {AMBIENTS.map((a) => {
-                const active = settings.ambient === a.id;
-                return (
-                  <button
-                    key={a.id}
-                    onClick={() => patchSettings({ ambient: a.id })}
-                    aria-pressed={active}
-                    title={active ? `Stop ${a.label}` : `Play ${a.label}`}
-                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all duration-200 active:scale-95 ${
-                      active
-                        ? "border-sky/55 bg-sky/10 text-sky shadow-[0_0_16px_-6px_rgba(125,165,255,0.55)]"
-                        : "border-pine-600 text-ink-faint hover:border-pine-500 hover:text-ink-dim"
-                    }`}
-                  >
-                    {active && a.id !== "off" && (
-                      <span className="flex h-3 items-end gap-[2.5px]" aria-hidden="true">
-                        <span className="anim-eq h-full w-[2.5px] rounded-full bg-sky" style={{ animationDelay: "0s" }} />
-                        <span className="anim-eq h-full w-[2.5px] rounded-full bg-sky" style={{ animationDelay: "0.18s" }} />
-                        <span className="anim-eq h-full w-[2.5px] rounded-full bg-sky" style={{ animationDelay: "0.36s" }} />
-                      </span>
-                    )}
-                    {a.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* now-focusing chip */}
-            <div className="mt-6 flex justify-center px-4">
-              {activeTask ? (
+              {query && (
                 <button
-                  onClick={() => setActiveId(null)}
-                  title="Click to unset"
-                  className="chip max-w-full border-ember/35 text-ink-dim transition-all duration-200 hover:border-ember/60 hover:text-ink"
+                  onClick={() => setQuery("")}
+                  aria-label="Clear filter"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 font-mono text-[13px] text-faint transition-colors hover:text-chalk"
                 >
-                  <IconTomato size={13} className="shrink-0 text-ember" />
-                  <span className="truncate text-xs">
-                    now focusing — <strong className="font-semibold text-ink">{activeTask.title}</strong>
-                  </span>
+                  ×
                 </button>
-              ) : (
-                <p className="text-center text-xs italic text-ink-faint">
-                  pick a task from the queue to track tomatoes against it
+              )}
+            </div>
+
+            <div className="mt-5 space-y-5">
+              <div>
+                <p className="flex items-center gap-2 px-2 font-mono text-[10px] font-bold uppercase tracking-[0.24em] text-faint">
+                  <IconFileBin size={12} className="text-gitorange" /> gitformat-*
+                </p>
+                <div className="mt-2 space-y-0.5">
+                  {formatSections.map((s) => (
+                    <button key={s.id} onClick={() => jump(s.id)} className={`side-item ${active === s.id ? "active" : ""}`}>
+                      <span className="truncate">{s.man}</span>
+                      <span className="ml-auto font-mono text-[9.5px] text-faint">(5)</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="flex items-center gap-2 px-2 font-mono text-[10px] font-bold uppercase tracking-[0.24em] text-faint">
+                  <IconWire size={12} className="text-chalkcyan" /> gitprotocol-*
+                </p>
+                <div className="mt-2 space-y-0.5">
+                  {protocolSections.map((s) => (
+                    <button key={s.id} onClick={() => jump(s.id)} className={`side-item ${active === s.id ? "active" : ""}`}>
+                      <span className="truncate">{s.man}</span>
+                      <span className="ml-auto font-mono text-[9.5px] text-faint">(7)</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {filtered.length === 0 && (
+                <p className="rounded-lg border border-dashed border-line px-3 py-4 text-center font-mono text-[11.5px] text-faint">
+                  no page matches "{query}"
                 </p>
               )}
             </div>
-          </section>
 
-          {/* stats + tasks side */}
-          <div className="flex min-h-0 flex-col gap-6">
-            <StatsPanel history={history} settings={settings} streak={streak} />
-            <TaskPanel
-              tasks={tasks}
-              activeId={activeId}
-              onAdd={addTask}
-              onSelect={(id) => setActiveId((cur) => (cur === id ? null : id))}
-              onToggleDone={toggleDone}
-              onDelete={deleteTask}
-              onClearDone={clearDone}
-              onReorder={reorderTasks}
-            />
-            <JournalPanel journal={journal} onClear={clearJournal} />
-          </div>
-        </main>
+            <div className="mt-6 hidden rounded-lg border border-line bg-deck/60 p-3 lg:block">
+              <p className="flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-faint">
+                <IconPrompt size={12} className="text-flare" /> read the real thing
+              </p>
+              <p className="mt-2 font-mono text-[11px] leading-relaxed text-dim">
+                man gitformat-pack
+                <br />
+                man gitprotocol-v2
+              </p>
+            </div>
+          </nav>
 
-        {/* footer */}
-        <footer
-          className="anim-rise mt-8 flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-t border-pine-700/70 pt-5 text-xs text-ink-faint"
-          style={{ animationDelay: "0.26s" }}
-        >
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <span className="flex items-center gap-1.5">
-              <kbd className="key">Space</kbd> start / pause
+          {/* sections */}
+          <main className="min-w-0 space-y-14 pb-10">
+            {filtered.map((s, idx) => (
+              <article key={s.id} id={s.id} className="reveal scroll-mt-24" style={{ transitionDelay: `${Math.min(idx, 3) * 60}ms` }}>
+                <header className="group/heading">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="kicker">{s.man}(5)</span>
+                    <span className="h-px flex-1 bg-line/80" />
+                    <SectionAnchor id={s.id} />
+                  </div>
+                  <h2 className="mt-2 font-display text-[clamp(1.5rem,2.6vw,2rem)] font-bold leading-tight tracking-tight text-chalk">
+                    {s.title}
+                  </h2>
+                  <p className="prose mt-2.5 max-w-[72ch] text-[15px] leading-relaxed text-fog">{s.lede}</p>
+                </header>
+                <div className="mt-6">{s.body}</div>
+              </article>
+            ))}
+
+            {filtered.length === 0 && (
+              <div className="panel px-6 py-12 text-center">
+                <p className="font-display text-xl font-bold text-chalk">Nothing in the manual matches that.</p>
+                <button
+                  onClick={() => setQuery("")}
+                  className="mt-4 rounded-lg border border-gitorange/60 bg-gitorange/10 px-4 py-2 font-mono text-[12px] font-bold text-flare transition-all hover:bg-gitorange/20 active:scale-95"
+                >
+                  clear the filter
+                </button>
+              </div>
+            )}
+          </main>
+        </div>
+
+        {/* ---------- man-page footer ---------- */}
+        <footer className="mb-8 pt-5" style={{ borderTop: "3px double var(--color-line2)" }}>
+          <div className="wire mb-5" />
+          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-dim">
+            <span>GITFIELD(5)</span>
+            <span className="flex items-center gap-2 normal-case tracking-normal text-faint">
+              <IconBranch size={13} className="text-gitorange" />
+              rendered for the web — consult <code className="text-chalkcyan">man gitformat-*</code> for canon
             </span>
-            <span className="flex items-center gap-1.5">
-              <kbd className="key">R</kbd> reset
-            </span>
-            <span className="flex items-center gap-1.5">
-              <kbd className="key">S</kbd> skip
-            </span>
-            <span className="flex items-center gap-1.5">
-              <kbd className="key">1–3</kbd> modes
-            </span>
-            <span className="flex items-center gap-1.5">
-              <kbd className="key">?</kbd> shortcuts
-            </span>
+            <span>Git Internals Manual · 2026</span>
           </div>
-          <p className="font-mono text-[11px] uppercase tracking-wider">
-            data stays in this browser · no account, no cloud
-          </p>
         </footer>
       </div>
-
-      <SettingsModal
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        settings={settings}
-        onPatch={patchSettings}
-        onEraseAll={eraseAll}
-        onExport={exportBackup}
-        onImport={importBackup}
-        onToast={(m) => addToast(m, "info")}
-      />
-      <ShortcutsOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
-      <Toasts toasts={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
     </div>
   );
 }
